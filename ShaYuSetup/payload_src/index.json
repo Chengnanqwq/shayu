@@ -1,82 +1,82 @@
 {
-    "app": {
-        "version": "0.002",
-        "released": "2026-11-05",
-        "notes": "插件市场上传/分享、插件商店、协议端随包、设置页卸载",
-        "url": ""
+  "app": {
+    "version": "0.003",
+    "released": "2026-11-05",
+    "notes": "插件市场上传/分享、插件商店、协议端随包、设置页卸载",
+    "url": ""
+  },
+  "version": 1,
+  "updated": "2026-11-05",
+  "plugins": [
+    {
+      "id": "qzone",
+      "name": "QQ空间",
+      "author": "shayu",
+      "version": "1.0.0",
+      "desc": "QQ 空间插件（QZONE_1105）—— 移植 astrbot_plugin_qzone 的读/赞/评/访客/传图。",
+      "tags": [
+        "社交",
+        "空间"
+      ],
+      "file": "plugins/qzone.py",
+      "url": "",
+      "size": 7512
     },
-    "version": 1,
-    "updated": "2026-11-05",
-    "plugins": [
-        {
-            "id": "qzone",
-            "name": "QQ空间",
-            "author": "shayu",
-            "version": "1.0.0",
-            "desc": "QQ 空间插件（QZONE_1105）—— 移植 astrbot_plugin_qzone 的读/赞/评/访客/传图。",
-            "tags": [
-                "社交",
-                "空间"
-            ],
-            "file": "plugins/qzone.py",
-            "url": "",
-            "size": 7512
-        },
-        {
-            "id": "memes",
-            "name": "表情图库",
-            "author": "shayu",
-            "version": "1.0.0",
-            "desc": "表情图库插件（MEME_1105b）—— 接到现有的 emotes/ 体系上。",
-            "tags": [
-                "聊天",
-                "娱乐"
-            ],
-            "file": "plugins/memes.py",
-            "url": "",
-            "size": 3419
-        },
-        {
-            "id": "signature",
-            "name": "改签名",
-            "author": "shayu",
-            "version": "1.0.0",
-            "desc": "改签名插件（SIGN_1105）—— 移植 astrbot_plugin_dafeiyu_signature。",
-            "tags": [
-                "社交"
-            ],
-            "file": "plugins/signature.py",
-            "url": "",
-            "size": 3713
-        },
-        {
-            "id": "profile",
-            "name": "QQ资料",
-            "author": "shayu",
-            "version": "1.0.0",
-            "desc": "QQ 资料插件（PROFILE_1105）—— 移植 astrbot_plugin_qqprofile。",
-            "tags": [
-                "社交"
-            ],
-            "file": "plugins/profile.py",
-            "url": "",
-            "size": 3031
-        },
-        {
-            "type": "data",
-            "id": "emotes-demo",
-            "name": "示例表情包",
-            "version": "1.0.0",
-            "author": "shayu",
-            "desc": "3 张示例表情，装完 /发表情 就能用（大表情库用 make_pack.py 自己打）",
-            "tags": [
-                "表情",
-                "示例"
-            ],
-            "target": "emotes",
-            "files": 3,
-            "size": 34983,
-            "url": "/packs/emotes-demo-1.0.0.zip"
-        }
-    ]
+    {
+      "id": "memes",
+      "name": "表情图库",
+      "author": "shayu",
+      "version": "1.0.0",
+      "desc": "表情图库插件（MEME_1105b）—— 接到现有的 emotes/ 体系上。",
+      "tags": [
+        "聊天",
+        "娱乐"
+      ],
+      "file": "plugins/memes.py",
+      "url": "",
+      "size": 3419
+    },
+    {
+      "id": "signature",
+      "name": "改签名",
+      "author": "shayu",
+      "version": "1.0.0",
+      "desc": "改签名插件（SIGN_1105）—— 移植 astrbot_plugin_dafeiyu_signature。",
+      "tags": [
+        "社交"
+      ],
+      "file": "plugins/signature.py",
+      "url": "",
+      "size": 3713
+    },
+    {
+      "id": "profile",
+      "name": "QQ资料",
+      "author": "shayu",
+      "version": "1.0.0",
+      "desc": "QQ 资料插件（PROFILE_1105）—— 移植 astrbot_plugin_qqprofile。",
+      "tags": [
+        "社交"
+      ],
+      "file": "plugins/profile.py",
+      "url": "",
+      "size": 3031
+    },
+    {
+      "type": "data",
+      "id": "emotes-demo",
+      "name": "示例表情包",
+      "version": "1.0.0",
+      "author": "shayu",
+      "desc": "3 张示例表情，装完 /发表情 就能用（大表情库用 make_pack.py 自己打）",
+      "tags": [
+        "表情",
+        "示例"
+      ],
+      "target": "emotes",
+      "files": 3,
+      "size": 34983,
+      "url": "/packs/emotes-demo-1.0.0.zip"
+    }
+  ]
 }
