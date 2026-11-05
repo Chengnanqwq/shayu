@@ -7041,20 +7041,21 @@ def start_panel():
                     items = []
                     try:
                         import plugins_loader
-                        if not getattr(plugins_loader, "_LOADED", None):
-                            plugins_loader.load_all(verbose=False)
-                        for p in getattr(plugins_loader, "_LOADED", []):
-                            mod = p.get("module")
+                        # PLUGIN_1106：一律走加载器的归一化结果，兼容 dict/类/包/别名钩子等写法
+                        for p in plugins_loader.list_plugins():
                             items.append({
                                 "id": str(p.get("path", "")).replace(".py", ""),
                                 "name": p.get("name") or "",
                                 "file": str(p.get("path", "")),
                                 "enabled": bool(p.get("enabled")),
-                                "commands": list(
-                                    (getattr(mod, "commands", lambda: {})() or {}).keys()
-                                ) if mod else [],
-                                "desc": (getattr(mod, "__doc__", "") or "").strip().split("\n")[0][:80]
-                                        if mod else "",
+                                "commands": list((p.get("commands") or {}).keys()),
+                                "desc": (p.get("desc") or "")[:80],
+                                "version": p.get("version") or "",
+                                "author": p.get("author") or "",
+                                "kind": p.get("kind") or "module",
+                                "hooks": p.get("hooks") or [],
+                                "error": p.get("error") or "",
+                                "missing": p.get("missing") or "",
                             })
                     except Exception as e:
                         # 退路：直接扫目录
