@@ -344,7 +344,12 @@ iframe.ready{opacity:1}
           <path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg>
         <span class="txt">语音合成</span>
       </div>
-      <div class="nav-item" data-view="log" title="运行日志">
+      <div class="nav-item" data-view="guide" title="使用教程">
+        <svg viewBox="0 0 24 24"><path d="M5 4h9l5 5v11a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 20z"/>
+          <path d="M14 4v5h5M8 13h8M8 17h5"/></svg>
+        <span class="txt">运行日志</span>
+      </div>
+  <div class="nav-item" data-view="log" title="运行日志">
         <svg viewBox="0 0 24 24"><path d="M5 4h9l5 5v11a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 20z"/>
           <path d="M14 4v5h5M8 13h8M8 17h5"/></svg>
         <span class="txt">运行日志</span>
@@ -442,6 +447,7 @@ function applyPanel(u) {
   URLS.brain = PANEL + "/brain?compact=1";
   URLS.panel = PANEL + "/";
   URLS.log = PANEL + "/";
+  URLS.guide = PANEL + "/guide?compact=1";
   URLS.voice = PANEL + "/tts";
   return changed;
 }
@@ -575,6 +581,55 @@ clock.textContent = new Date().toLocaleTimeString("zh-CN", { hour12: false });
 if (location.search.indexOf("setup=1") >= 0) {
   window.addEventListener("load", () => setTimeout(showSetup, 300));
 }
+
+// ══════════════════════════════════════════════════════
+// PLUGIN_UI_1106：插件可以往面板里塞界面
+//   插件返回 html / css / js，这里负责注入并给它一个安全的小 API
+// ══════════════════════════════════════════════════════
+window.shayu = {
+  api: function (path, opts) { return fetch(PANEL + path, opts); },
+  panel: function () { return PANEL; },
+  toast: function (t) {
+    const d = document.createElement("div");
+    d.textContent = t;
+    d.style.cssText = "position:fixed;left:50%;bottom:80px;transform:translateX(-50%);z-index:99;" +
+      "background:rgba(20,22,38,.92);color:#e6ebff;padding:8px 16px;border-radius:10px;font-size:13px;" +
+      "border:1px solid rgba(140,150,255,.28)";
+    document.body.appendChild(d);
+    setTimeout(function () { d.remove(); }, 2400);
+  }
+};
+
+function loadPluginUI() {
+  fetch(PANEL + "/api/plugins/ui", { cache: "no-store" })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (!d || !d.ok) return;
+      var css = "", html = "", js = [];
+      (d.plugins || []).forEach(function (p) {
+        if (p.css) css += "\n/* " + p.name + " */\n" + p.css;
+        if (p.html) html += "\n<!-- " + p.name + " -->\n" + p.html;
+        if (p.js) js.push("/* " + p.name + " */\n" + p.js);
+      });
+      if (css) {
+        var st = document.createElement("style");
+        st.textContent = css;
+        document.head.appendChild(st);
+      }
+      if (html) {
+        var box = document.createElement("div");
+        box.id = "plugin-ui-root";
+        box.innerHTML = html;
+        document.body.appendChild(box);
+      }
+      js.forEach(function (code) {
+        try { new Function("shayu", code)(window.shayu); }
+        catch (e) { console.warn("[plugin ui]", e); }
+      });
+    })
+    .catch(function () { /* 面板没起来就不注入 */ });
+}
+loadPluginUI();
 
 // 主动要一次设置：C# 那边页面还没加载完就推的话会被丢掉，别指望一次成功
 post({ cmd: "getSettings" });

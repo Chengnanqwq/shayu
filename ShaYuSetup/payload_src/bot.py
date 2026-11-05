@@ -157,6 +157,19 @@ try:
 
     BRAIN = _brain_mod.Brain(STATE_DIR)
     BRAIN.load()
+    # EXT_1106：把 bot 的能力交给插件（配置 / 推送 / 记忆 / 事件循环）
+    if _PLUGINS_OK:
+        try:
+            _plugins.set_bot_hooks(
+                cfg=lambda: CFG,
+                set_cfg=lambda k, v: CFG.__setitem__(k, v),
+                notify=lambda text: notify_master(str(text)),
+                memory=BRAIN,
+                loop=globals().get("LOOP"),
+            )
+            _plugins.start_timers(globals().get("LOOP"))
+        except Exception as _pe2:
+            print(f"[fish_bot] 插件 API 注入失败: {_pe2}")
 except Exception as _exc:  # 记忆层挂了不影响聊天
     BRAIN = None
     print(f"[fish_bot] 记忆层没起来（{_exc}），这一轮不记东西")
@@ -7208,6 +7221,44 @@ def start_panel():
                     self._send(200, json.dumps({"ok": True, "plugins": items},
                                                 ensure_ascii=False), "application/json")
                     return
+                if self.path == "/api/plugins/ui":
+                    # APP_1106：插件注入的面板 UI（html / css / js）
+                    try:
+                        items = _plugins.ui_payload() if _PLUGINS_OK else []
+                        self._send(200, json.dumps({"ok": True, "plugins": items},
+                                                   ensure_ascii=False), "application/json")
+                    except Exception as e:
+                        self._send(200, json.dumps({"ok": False, "error": str(e)},
+                                                   ensure_ascii=False), "application/json")
+                    return
+                if self.path.startswith("/plug/"):
+                    # APP_1106：插件自己的接口 /plug/<插件>/<path>
+                    try:
+                        rest = self.path.split("/plug/", 1)[1]
+                        name, _, sub = rest.partition("/")
+                        q = {}
+                        if "?" in sub:
+                            sub, _, qs = sub.partition("?")
+                            for kv in qs.split("&"):
+                                if "=" in kv:
+                                    k, v = kv.split("=", 1)
+                                    q[urllib.parse.unquote(k)] = urllib.parse.unquote(v)
+                        n = int(self.headers.get("Content-Length", "0") or 0)
+                        body = self.rfile.read(n) if n else b""
+                        res = _plugins.http_route(name, sub, q, body) if _PLUGINS_OK else (503, {"ok": False})
+                        st, payload = res[0], res[1]
+                        ctype_hint = res[2] if len(res) > 2 else ""
+                        if isinstance(payload, (bytes, bytearray)):
+                            self._send(st, bytes(payload), ctype_hint or "application/octet-stream")
+                            return
+                        if isinstance(payload, (dict, list)):
+                            self._send(st, json.dumps(payload, ensure_ascii=False), "application/json")
+                        else:
+                            self._send(st, str(payload), "text/plain; charset=utf-8")
+                    except Exception as e:
+                        self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                                   ensure_ascii=False), "application/json")
+                    return
                 if self.path.startswith("/api/store"):
                     # STORE_GH：商店就是一个 GitHub 仓库（index.json + plugins/*.py）。
                     # 读不需要 token，公开仓库谁都能拉；写（分享）要 store_token。
@@ -7314,6 +7365,15 @@ def start_panel():
                         self._send(200, page.read_bytes())
                     else:
                         self._send(404, "brain_viz.html 还没放进来")
+                    return
+                if self.path.split("?")[0] in ("/guide", "/guide.html"):
+                    # GUIDE_1106：应用内使用教程（一个静态页）
+                    try:
+                        f = BASE_DIR / "guide.html"
+                        html = f.read_text(encoding="utf-8") if f.exists() else "<h1>教程文件缺失</h1>"
+                        self._send(200, html, "text/html; charset=utf-8")
+                    except Exception as e:
+                        self._send(500, f"guide error: {e}", "text/plain; charset=utf-8")
                     return
                 if self.path.split("?")[0] in ("/desk", "/desk.html"):
                     page = BASE_DIR / "desk.html"

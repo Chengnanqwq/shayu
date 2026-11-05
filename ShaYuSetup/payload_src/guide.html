@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>傻鱼 · 使用教程</title>
+<style>
+:root{--bg:#0b0e15;--card:#12141f;--line:rgba(255,255,255,.09);--tx:#e7ebff;--dim:#9aa4c8;
+      --acc:#8f8cff;--acc2:#5fe3ff;--ok:#4be08f;--warn:#ffca63}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.85 "Microsoft YaHei","PingFang SC",system-ui,sans-serif}
+.wrap{display:flex;min-height:100vh}
+nav{position:sticky;top:0;height:100vh;width:236px;flex:none;overflow:auto;padding:22px 16px;
+    border-right:1px solid var(--line);background:rgba(255,255,255,.012)}
+nav h1{font-size:15px;margin:0 0 4px;letter-spacing:1px}
+nav .sub{font-size:11px;color:var(--dim);margin-bottom:16px;letter-spacing:.5px}
+nav a{display:block;color:var(--dim);text-decoration:none;font-size:12.5px;padding:5px 9px;border-radius:7px;
+       margin-bottom:2px;border-left:2px solid transparent}
+nav a:hover{background:rgba(255,255,255,.05);color:var(--tx)}
+nav a.on{color:#fff;background:rgba(143,140,255,.14);border-left-color:var(--acc)}
+main{flex:1;padding:34px 46px 90px;max-width:960px}
+h2{font-size:20px;margin:44px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--line);scroll-margin-top:20px}
+h2:first-of-type{margin-top:0}
+h3{font-size:15px;margin:22px 0 8px;color:#cfd6ff}
+p,li{color:#c8cfe8}
+ul,ol{padding-left:22px}
+li{margin:4px 0}
+code{background:rgba(143,140,255,.14);color:#d8d6ff;padding:1px 6px;border-radius:5px;font-size:12.5px;
+     font-family:Consolas,monospace}
+pre{background:#0e1018;border:1px solid var(--line);border-radius:10px;padding:13px 16px;overflow:auto;font-size:12.5px;
+    line-height:1.7;color:#c9d2f0}
+pre code{background:none;padding:0;color:inherit}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th,td{border:1px solid var(--line);padding:7px 11px;text-align:left;vertical-align:top}
+th{background:rgba(143,140,255,.10);color:#dfe4ff;font-weight:600}
+td{color:#c0c8e6}
+.tip{background:rgba(95,227,255,.07);border-left:3px solid var(--acc2);padding:10px 14px;border-radius:0 8px 8px 0;margin:12px 0;font-size:13px}
+.warn{background:rgba(255,202,99,.07);border-left:3px solid var(--warn);padding:10px 14px;border-radius:0 8px 8px 0;margin:12px 0;font-size:13px}
+.k{display:inline-block;min-width:20px;text-align:center;padding:1px 7px;border-radius:5px;
+   background:rgba(255,255,255,.08);border:1px solid var(--line);font-size:12px;font-family:Consolas,monospace}
+.badge{display:inline-block;font-size:11px;padding:1px 8px;border-radius:20px;background:rgba(143,140,255,.18);
+       color:#c9c6ff;margin-left:6px;vertical-align:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav>
+  <h1>傻鱼 · 使用教程</h1>
+  <div class="sub">全部功能 · 一页看完</div>
+  <a href="#start">1. 装好它</a>
+  <a href="#ui">2. 界面导览</a>
+  <a href="#qq">3. 接入 QQ</a>
+  <a href="#persona">4. 人设</a>
+  <a href="#memory">5. 记忆</a>
+  <a href="#voice">6. 语音</a>
+  <a href="#sing">7. 翻唱</a>
+  <a href="#plugins">8. 插件</a>
+  <a href="#settings">9. 参数设置</a>
+  <a href="#desk">10. 桌面聊天</a>
+  <a href="#backup">11. 备份 / 迁移 / 卸载</a>
+  <a href="#keys">12. 快捷键</a>
+  <a href="#faq">13. 常见问题</a>
+  <a href="#privacy">14. 隐私与安全</a>
+</nav>
+<main>
+
+<h2 id="start">1. 装好它</h2>
+<p>双击 <code>傻鱼安装包.exe</code>，五步向导：</p>
+<ol>
+  <li><b>选路径</b>：必须英文、无空格，例如 <code>D:\ShaYu</code>，约 300 MB</li>
+  <li><b>环境检验</b>：安装包、WebView2、协议端、端口——标 <span style="color:var(--warn)">!</span> 的才要处理，标 ✓ 的可以装完再说</li>
+  <li><b>填账号</b>：机器人 QQ（小号）、主人 QQ（大号）、DeepSeek API-Key</li>
+  <li><b>安装</b>：解包 + 写配置 + 生成桌面快捷方式</li>
+  <li><b>完成</b>：双击桌面「启动傻鱼」</li>
+</ol>
+<div class="tip">API-Key 在 <code>platform.deepseek.com</code> 申请，按量计费；不填也能装，但机器人不会说话（会回「……」）。</div>
+
+<h2 id="ui">2. 界面导览</h2>
+<table>
+<tr><th>页面</th><th>干什么</th></tr>
+<tr><td>🌌 大脑</td><td>记忆星系：所有记忆摊成两条旋臂，点节点看原文，滚轮缩放，拖拽旋转</td></tr>
+<tr><td>⚙ 参数设置</td><td>13 组配置：账号、模型密钥、人设、说话方式、主动搭话、语音、QQ 空间、记忆、权限、作息、功能开关</td></tr>
+<tr><td>🧩 插件市场</td><td>装插件、传插件、启停、卸载、看商店</td></tr>
+<tr><td>🖥 管理面板</td><td>状态、执行命令、日志</td></tr>
+<tr><td>🔊 语音合成</td><td>TTS 三模式、音色克隆、试合成</td></tr>
+<tr><td>📄 运行日志</td><td>今天的日志，排错第一现场</td></tr>
+</table>
+<p>左侧竖栏图标从上到下：大脑、参数、插件、面板、语音、日志。点一下切换，右下角显示连接状态。</p>
+
+<h2 id="qq">3. 接入 QQ</h2>
+<ol>
+  <li>安装目录下的 <code>snowluma/</code> 是协议端（随安装包自带）</li>
+  <li>由「启动傻鱼」自动拉起；也可以手动跑 <code>snowluma\app\index.mjs</code></li>
+  <li>浏览器打开 <code>http://127.0.0.1:3000</code> 扫码登录<b>小号</b></li>
+  <li>登录后协议端会自动连到机器人（<code>ws://127.0.0.1:6199</code>）</li>
+  <li>面板顶部状态灯：<code>SnowLuma 在线</code> + <code>云端 连线</code> 就通了</li>
+</ol>
+<div class="warn">用小号登录协议端，<b>不要用主号</b>。主号只在「主人 QQ」里填，用来认人。</div>
+<h3>掉线了怎么办</h3>
+<ul>
+  <li>状态灯变灰 → 点「重启 SnowLuma」</li>
+  <li>扫码过期 → 重新打开 <code>:3000</code> 扫一次</li>
+  <li>端口被占 → 参数里把 <code>ws_url</code> 改成实际端口</li>
+</ul>
+
+<h2 id="persona">4. 人设</h2>
+<p>参数设置 → <b>人设</b> 分组，八个字段，改哪条都不牵动别的：</p>
+<table>
+<tr><th>字段</th><th>作用</th><th>例子</th></tr>
+<tr><td>她叫什么</td><td>自称（可以不填，用通用称呼）</td><td>傻鱼 / 小鱼</td></tr>
+<tr><td>身份定位</td><td>她是什么、住哪、能不能做现实里的事</td><td>DeepSeek 的娘化，住在电脑里，不是活人</td></tr>
+<tr><td>性格</td><td>三层性格、脾气、病娇程度</td><td>外面闹腾爱怼，底子靠谱，带点病娇</td></tr>
+<tr><td>说话方式</td><td>句子长短、标点、口头禅偏好</td><td>像群友发消息，一条十几二十字</td></tr>
+<tr><td>喜欢 / 讨厌</td><td>触发情绪的点</td><td>喜欢白米饭、被夸；讨厌被叫大肥鱼</td></tr>
+<tr><td>不做的事</td><td>硬边界</td><td>不装活人、不说自己能出门</td></tr>
+<tr><td>补充设定</td><td>其他细节</td><td>唱歌真能唱，本机有翻唱服务</td></tr>
+</table>
+<p>保存即生效（改正文建议重启一次）。也可以切「整段人设」模式，直接写一整段。</p>
+
+<h2 id="memory">5. 记忆</h2>
+<p>记忆分六类：<b>人物 / 事实 / 约定 / 情绪 / 经历 / 技能</b>，存在 <code>brain_memory.json</code>。</p>
+<ul>
+  <li><b>重要度衰减</b>：200 天半衰期，人物卡与约定几乎不衰减</li>
+  <li><b>自动提炼</b>：聊完一轮自动判断要不要记</li>
+  <li><b>近况强制入库</b>：失业 / 住院 / 生病 / 去世 / 分手 / 考试 / 面试 / 搬家 / 吵架 / 被骂 这类事件不管长短都会记</li>
+  <li><b>上限</b>：2000 个节点，超了按重要度淘汰</li>
+</ul>
+<h3>在大脑视图里</h3>
+<ul>
+  <li>拖拽旋转、滚轮缩放、<span class="k">0</span> 复位</li>
+  <li>点节点看原文，点空白还原</li>
+  <li>左上「记忆层」开关：关掉只留背景星空</li>
+  <li>「收起 ▴」把左侧开关收起来，只看星系</li>
+</ul>
+
+<h2 id="voice">6. 语音</h2>
+<p>参数设置 → <b>语音</b>，三种模式：</p>
+<table>
+<tr><th>模式</th><th>怎么用</th></tr>
+<tr><td>文字提示语音</td><td>用一句话描述音色（例：二十岁女生，语气慵懒）</td></tr>
+<tr><td>预设音色</td><td>下拉选现成音色，最稳</td></tr>
+<tr><td>声音克隆</td><td>上传 10~30 秒干净语音，自动克隆</td></tr>
+</table>
+<p>填好 <code>base_url</code> + <code>密钥</code>，点「检查」看通不通，点「试合成」听效果。</p>
+<ul>
+  <li><b>语音概率</b>：多少比例的消息用语音回（默认 15%）</li>
+  <li><b>单条字数上限</b>：太长会截断</li>
+  <li>模型名可点「拉取模型」自动列出来</li>
+</ul>
+
+<h2 id="sing">7. 翻唱</h2>
+<p>需要 <b>NVIDIA 显卡</b>与 RVC 环境（安装包自带 <code>sing/</code>）。</p>
+<ol>
+  <li>面板点「启动翻唱」，等服务起来（状态变「运行中」）</li>
+  <li>对她说「唱首歌」或「翻唱《xxx》」，她会走本机 RVC 推理</li>
+  <li>一首 5 分钟的歌约 3 分钟出片</li>
+</ol>
+<div class="warn">翻唱服务不会自己开。面板「停止翻唱」后，守夜脚本也不会再拉起——它只在 <code>D:\RVC\sing_wanted.flag</code> 存在时才保活。</div>
+<h3>失败了看哪里</h3>
+<ul>
+  <li>状态「运行中」但没声 → 看 <code>logs/</code> 里 <code>[sing]</code> 开头的行</li>
+  <li>显存不足 → 关闭其他占显存的程序，或换小模型</li>
+  <li>一直「启动中」→ 点停止再启动，或者看 7100 端口是否被占</li>
+</ul>
+
+<h2 id="plugins">8. 插件</h2>
+<p>插件是一个 <code>.py</code> 文件，放进 <code>plugins/</code> 就生效，不用重启。</p>
+<h3>装插件</h3>
+<ul>
+  <li><b>拖拽</b>：把 .py 拖进插件市场窗口</li>
+  <li><b>上传</b>：点「上传插件」选文件</li>
+  <li><b>商店</b>：插件市场 →「商店」标签 → 点安装</li>
+</ul>
+<h3>管理</h3>
+<ul>
+  <li>启用 / 停用：卡片上的开关</li>
+  <li>卸载：只移到 <code>plugins/_removed/</code>，随时能找回</li>
+  <li>更新：商店里显示「更新到 vX」时点一下</li>
+</ul>
+<h3>自带插件</h3>
+<table>
+<tr><th>插件</th><th>作用</th></tr>
+<tr><td>去 DS 口癖</td><td>删掉模型自带的「这句话稳 / 我不接 / 比之前的都重」这类口头禅</td></tr>
+<tr><td>面板小工具</td><td>右下角状态卡片（在线 / 记忆条数），演示插件改界面</td></tr>
+<tr><td>时间感知</td><td>本地报时、算周末倒计时，不花模型额度</td></tr>
+<tr><td>防复读</td><td>连续几轮说同一句时自动换掉</td></tr>
+<tr><td>收短</td><td>超 90 字收成一两句，去掉客服腔</td></tr>
+<tr><td>兜底防出戏</td><td>「作为AI / 语言模型 / 我无法」这类句子在出口切掉</td></tr>
+<tr><td>表情图库 / QQ空间 / QQ资料 / 改签名</td><td>原有功能</td></tr>
+</table>
+<h3>自己写</h3>
+<p>见插件商店仓库的 <code>PLUGIN_GUIDE.md</code>：钩子表、API、兼容矩阵、四个最小例子。最小可用：</p>
+<pre><code>NAME = "打招呼"
+VERSION = "1.0.0"
+
+async def on_message(ctx):
+    if ctx["text"].startswith("/你好"):
+        await ctx["reply"]("你好呀。")
+        return True
+    return False</code></pre>
+
+<h2 id="settings">9. 参数设置</h2>
+<table>
+<tr><th>分组</th><th>关键项</th></tr>
+<tr><td>接入与账号</td><td><code>ws_url</code> 协议端地址、<code>master_qq</code> 主人、<code>self_qq</code> 机器人、对外昵称</td></tr>
+<tr><td>模型与密钥</td><td><code>llm_base</code>、<code>llm_model</code>、<code>llm_key</code>、备用模型</td></tr>
+<tr><td>人设</td><td>八个字段（见第 4 节）</td></tr>
+<tr><td>说话方式</td><td>每条字数、分几条、回复延迟范围、引用回复</td></tr>
+<tr><td>主动说话</td><td>活跃度、频率、夜间静默</td></tr>
+<tr><td>语音</td><td>TTS 三模式、语音概率、克隆</td></tr>
+<tr><td>QQ 空间</td><td>是否读说说、点赞、评论</td></tr>
+<tr><td>记忆</td><td>每段字数、记忆层开关、反思频率</td></tr>
+<tr><td>权限与黑名单</td><td>谁能触发、谁被拉黑、管理员列表</td></tr>
+<tr><td>作息</td><td>睡觉时间、醒来时间、睡眠时是否回消息</td></tr>
+<tr><td>功能开关</td><td>看屏、看视频、拍一拍、禁言、搜图、天气、记账…</td></tr>
+<tr><td>其他设置</td><td>插件商店仓库、镜像、端口</td></tr>
+</table>
+<p>右上角「保存」写回 <code>config.json</code>，大部分即时生效，端口类要重启。</p>
+
+<h2 id="desk">10. 桌面聊天</h2>
+<p>面板里「桌面聊天」是一个独立窗口，和 QQ 共用同一颗灵魂、同一份记忆，只是换个地方说话。</p>
+<ul>
+  <li>这里说的话也会进记忆（写了节点的会）</li>
+  <li>最近 40 条存在 <code>desk_chat.json</code>，重启还在</li>
+  <li>QQ 那边同时在聊也不会串</li>
+</ul>
+
+<h2 id="backup">11. 备份 / 迁移 / 卸载</h2>
+<h3>备份</h3>
+<pre><code>brain_memory.json    她记得的一切（最重要）
+config.json          全部配置
+persona.txt          人设正文
+plugins/             自己装的插件</code></pre>
+<h3>迁移</h3>
+<p>整个安装目录拷到新电脑 → 双击「启动傻鱼」。路径变了要重扫码。</p>
+<h3>卸载</h3>
+<p>参数设置 → 最下方「卸载傻鱼」→ 删整个安装目录 + 清快捷方式。
+<b>记忆、配置、插件一起没</b>，删之前先备份 <code>brain_memory.json</code>。</p>
+
+<h2 id="keys">12. 快捷键</h2>
+<table>
+<tr><th>在哪</th><th>键</th><th>作用</th></tr>
+<tr><td>大脑视图</td><td><span class="k">H</span></td><td>隐藏 / 显示界面</td></tr>
+<tr><td>大脑视图</td><td><span class="k">C</span></td><td>收起 / 展开左侧开关面板</td></tr>
+<tr><td>大脑视图</td><td><span class="k">0</span></td><td>复位视角</td></tr>
+<tr><td>大脑视图</td><td>方向键 / 滚轮</td><td>旋转 / 缩放</td></tr>
+<tr><td>面板</td><td>右键</td><td>刷新（部分页面）</td></tr>
+</table>
+
+<h2 id="faq">13. 常见问题</h2>
+<h3>她不说话 / 只回「……」</h3>
+<p>模型没通。参数设置 → 模型与密钥，把 <code>llm_key</code> 填对，点「检查」。</p>
+<h3>面板打不开</h3>
+<p>看 6200/6201 端口是否被占，或机器人是否在跑（状态灯）。改端口后要重启。</p>
+<h3>消息不回</h3>
+<ul>
+  <li>协议端掉线（状态灯灰）</li>
+  <li><code>master_qq</code> 填错，她不认为你是主人</li>
+  <li>在「权限与黑名单」里被拉黑</li>
+  <li>她在睡觉（作息里配置），睡着时可能不回</li>
+</ul>
+<h3>语音没声音</h3>
+<p>先「试合成」验证 TTS 通不通；通了但 QQ 没声，检查语音概率与单条字数上限。</p>
+<h3>翻唱失败</h3>
+<p>看第 7 节；最常见是显存不足或 7100 端口被占。</p>
+<h3>记忆太多 / 想清空</h3>
+<p>大脑视图里逐个「忘掉」，或者删 <code>brain_memory.json</code> 后重启（等于重开一生）。</p>
+
+<h2 id="privacy">14. 隐私与安全</h2>
+<ul>
+  <li><b>只有一次外发</b>：bot → 模型 API，内容是这一轮的文本</li>
+  <li>记忆、人设、配置、日志全在安装目录，删目录 = 删干净</li>
+  <li>面板只监听 <code>127.0.0.1</code>，别往公网暴露</li>
+  <li>别把 <code>config.json</code>（含 key）发给任何人</li>
+  <li>协议端是第三方项目，遵守其条款；用小号跑</li>
+</ul>
+
+<p style="margin-top:60px;color:var(--dim);font-size:12px">
+傻鱼 ShaYu · 使用教程 · 对应版本 v0.003 ·
+<a href="https://github.com/Chengnanqwq/shayu" style="color:var(--acc)">开源仓库</a> ·
+<a href="https://github.com/Chengnanqwq/shayu-plugins" style="color:var(--acc)">插件商店</a>
+</p>
+
+</main>
+</div>
+<script>
+// 侧栏高亮当前章节
+var links = [].slice.call(document.querySelectorAll("nav a"));
+var secs = links.map(function (a) { return document.querySelector(a.getAttribute("href")); });
+function onScroll() {
+  var y = window.scrollY + 120, idx = 0;
+  secs.forEach(function (s, i) { if (s && s.offsetTop <= y) idx = i; });
+  links.forEach(function (a, i) { a.classList.toggle("on", i === idx); });
+}
+window.addEventListener("scroll", onScroll, { passive: true });
+onScroll();
+</script>
+</body>
+</html>
