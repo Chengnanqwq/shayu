@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>傻鱼 · 记忆星图</title>
+<style>
+  :root{
+    --bg:#04060e; --sub:#7b8aa8; --tx:#dbe6ff; --acc:#6f8cff;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--tx);
+    font-family:"Microsoft YaHei UI",system-ui}
+  canvas{display:block;width:100%;height:100%}
+  #hud{position:fixed;top:18px;left:22px;z-index:5;pointer-events:none}
+  #hud h1{margin:0;font-size:19px;letter-spacing:1px;font-weight:700}
+  #hud h1 i{color:var(--acc);font-style:normal}
+  #hud p{margin:5px 0 0;font-size:12px;color:var(--sub);letter-spacing:.4px}
+  #stats{position:fixed;top:18px;right:22px;z-index:5;text-align:right;font-size:12px;color:var(--sub)}
+  #stats b{color:#fff;font-size:17px;font-weight:700}
+  #stats span{margin-left:16px}
+  #views{position:fixed;left:22px;bottom:22px;z-index:6;display:flex;gap:8px;flex-wrap:wrap}
+  #views button{background:rgba(24,34,58,.78);color:#b9c8e6;border:1px solid #223257;
+    border-radius:20px;padding:8px 16px;font-size:12.5px;font-family:inherit;cursor:pointer;
+    transition:all .16s;backdrop-filter:blur(6px)}
+  #views button:hover{border-color:var(--acc);color:#fff}
+  #views button.on{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+  #legend{position:fixed;right:22px;bottom:22px;z-index:6;display:flex;flex-direction:column;
+    gap:6px;font-size:11.5px;color:var(--sub);text-align:right}
+  #legend div{display:flex;align-items:center;gap:7px;justify-content:flex-end}
+  #legend i{width:8px;height:8px;border-radius:50%;display:inline-block}
+  #card{position:fixed;right:22px;top:70px;width:310px;z-index:7;display:none;
+    background:rgba(12,18,32,.94);border:1px solid #1d2b47;border-radius:14px;
+    padding:16px 18px;box-shadow:0 12px 40px rgba(0,0,0,.55);backdrop-filter:blur(10px)}
+  #card h3{margin:0 0 8px;font-size:14px;line-height:1.6;font-weight:600}
+  #card .tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:10px;
+    border:1px solid currentColor;margin-right:6px}
+  #card p{margin:9px 0 0;font-size:12px;color:var(--sub);line-height:1.7}
+  #card b{color:#fff}
+  #card .close{position:absolute;right:12px;top:10px;cursor:pointer;color:#5c7099;font-size:15px}
+  #tip{position:fixed;z-index:9;display:none;background:rgba(10,16,28,.95);
+    border:1px solid #253a5e;border-radius:8px;padding:6px 10px;font-size:12px;
+    max-width:300px;line-height:1.6;pointer-events:none}
+  #load{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    background:var(--bg);z-index:20;font-size:13px;color:var(--sub);letter-spacing:2px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <h1>傻鱼 · <i>记忆星图</i></h1>
+  <p id="sub">点亮 902 段记忆</p>
+</div>
+<div id="stats">
+  <span><b id="s-node">0</b> 记忆</span>
+  <span><b id="s-edge">0</b> 联想</span>
+  <span><b id="s-fps">0</b> fps</span>
+</div>
+<div id="views"></div>
+<div id="legend"></div>
+<div id="card"><span class="close" onclick="closeCard()">×</span>
+  <div id="cardbody"></div></div>
+<div id="tip"></div>
+<div id="load">正在读取记忆…</div>
+
+<script>
+/* ================= 类型与配色 ================= */
+const KINDS = {
+  person:    {n:"人物",   c:"#FF3B5C"},
+  empathy:   {n:"别人的情绪", c:"#FF6FB5"},
+  quote:     {n:"金句",   c:"#C238FF"},
+  feeling:   {n:"情绪",   c:"#8A5CFF"},
+  skill:     {n:"技能",   c:"#3D7DFF"},
+  fact:      {n:"事实",   c:"#00D4FF"},
+  meme:      {n:"梗",     c:"#00E59B"},
+  object:    {n:"实物",   c:"#7ED957"},
+  event:     {n:"事件",   c:"#FFC53D"},
+  agreement: {n:"约定",   c:"#FFF066"},
+  visual:    {n:"视觉",   c:"#FF8A3D"},
+  work:      {n:"短期",   c:"#8FA0B8"}
+};
+const VIEWS = [
+  ["spiral", "螺旋星系", "按类型分旋臂，重要记忆靠内圈"],
+  ["cluster", "记忆星团", "球状聚拢，中心是核心记忆"],
+  ["network", "联想网络", "按关联强度铺开，看谁和谁连着"]
+];
+
+/* ================= 状态 ================= */
+let NODES = [], EDGES = [], VIEW = "spiral";
+let cam = {x: 0, y: 0, z: 1, tx: 0, ty: 0, tz: 1};
+let hover = null, selected = null, DPR = 1, W = 0, H = 0;
+let sprites = {}, lastMs = 0, fps = 60;
+let spin = 0, spinHold = 0, dragging = false;   // 自转角 / 暂停到什么时候
+
+const cv = document.getElementById("c");
+const ctx = cv.getContext("2d");
+
+/* ================= 工具 ================= */
+function rgb(hex) {
+  const h = hex.replace("#", "");
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+function mkSprite(color) {
+  // 160px 离屏画布：缩小绘制时边缘才干净，64px 放大会糊
+  const S = 160, c = document.createElement("canvas");
+  c.width = c.height = S;
+  const g = c.getContext("2d");
+  const [r, gr, b] = rgb(color);
+  // 光晕
+  const rg = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+  rg.addColorStop(0, "rgba(255,255,255,.98)");
+  rg.addColorStop(0.10, `rgba(${r},${gr},${b},.95)`);
+  rg.addColorStop(0.28, `rgba(${r},${gr},${b},.42)`);
+  rg.addColorStop(0.60, `rgba(${r},${gr},${b},.10)`);
+  rg.addColorStop(1, `rgba(${r},${gr},${b},0)`);
+  g.fillStyle = rg;
+  g.beginPath(); g.arc(S / 2, S / 2, S / 2, 0, 6.2832); g.fill();
+  // 十字星芒
+  g.globalCompositeOperation = "lighter";
+  const mid = S / 2;
+  for (const [len, alpha, wid] of [[S * 0.46, 0.55, 1.6], [S * 0.26, 0.32, 3.2]]) {
+    const lg = g.createLinearGradient(mid - len, mid, mid + len, mid);
+    lg.addColorStop(0, `rgba(${r},${gr},${b},0)`);
+    lg.addColorStop(0.5, `rgba(255,255,255,${alpha})`);
+    lg.addColorStop(1, `rgba(${r},${gr},${b},0)`);
+    g.strokeStyle = lg; g.lineWidth = wid;
+    g.beginPath(); g.moveTo(mid - len, mid); g.lineTo(mid + len, mid); g.stroke();
+    const lg2 = g.createLinearGradient(mid, mid - len, mid, mid + len);
+    lg2.addColorStop(0, `rgba(${r},${gr},${b},0)`);
+    lg2.addColorStop(0.5, `rgba(255,255,255,${alpha})`);
+    lg2.addColorStop(1, `rgba(${r},${gr},${b},0)`);
+    g.strokeStyle = lg2;
+    g.beginPath(); g.moveTo(mid, mid - len); g.lineTo(mid, mid + len); g.stroke();
+  }
+  // 中心亮点
+  g.globalCompositeOperation = "source-over";
+  g.fillStyle = "rgba(255,255,255,.95)";
+  g.beginPath(); g.arc(mid, mid, S * 0.035, 0, 6.2832); g.fill();
+  return c;
+}
+function resize() {
+  DPR = window.devicePixelRatio || 1;
+  W = cv.clientWidth; H = cv.clientHeight;
+  cv.width = W * DPR; cv.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener("resize", () => { resize(); });
+
+/* ================= 数据 ================= */
+async function load() {
+  const d = await (await fetch("/api/memory")).json();
+  NODES = d.nodes.map(n => ({
+    id: n.id, k: KINDS[n.k] ? n.k : "fact", t: n.t || "",
+    imp: n.imp || 0.5, hits: n.hits || 0, act: n.act || 0,
+    x: 0, y: 0, z: 0, r: 0, a: 1
+  }));
+  const byId = {};
+  NODES.forEach(n => { byId[n.id] = n; });
+  EDGES = (d.edges || []).filter(e => byId[e[0]] && byId[e[1]])
+    .map(e => ({ a: byId[e[0]], b: byId[e[1]], w: e[2] || 0.3 }));
+
+  Object.keys(KINDS).forEach(k => { sprites[k] = mkSprite(KINDS[k].c); });
+  sprites._core = mkSprite("#dfefff");
+
+  document.getElementById("s-node").textContent = NODES.length;
+  document.getElementById("s-edge").textContent = EDGES.length;
+  renderViews(); renderLegend();
+  layout("spiral");
+  document.getElementById("load").style.display = "none";
+  requestAnimationFrame(loop);
+}
+
+/* ================= 布局 ================= */
+function layout(mode) {
+  VIEW = mode;
+  const N = NODES.length;
+  if (mode === "spiral") {
+    // 按类型分 6 条旋臂；越重要越靠内
+    const kinds = Object.keys(KINDS);
+    const armOf = {};
+    let an = 0;
+    kinds.forEach(k => { armOf[k] = an++ % 6; });
+    // 按重要度排序决定"沿臂进度"
+    const sorted = NODES.slice().sort((p, q) => (q.imp + q.hits / 400) - (p.imp + p.hits / 400));
+    sorted.forEach((n, i) => {
+      const f = Math.pow(i / N, 0.62);              // 内密外疏
+      const arm = armOf[n.k] || 0;
+      const th = arm * (Math.PI * 2 / 6) + f * Math.PI * 2.1
+                 + (Math.random() - 0.5) * 0.22;
+      const r = 12 + f * 210 + (Math.random() - 0.5) * 16;
+      n.x = Math.cos(th) * r;
+      n.y = Math.sin(th) * r * 0.72 + (Math.random() - 0.5) * 26;   // 压扁成盘
+      n.z = (Math.random() - 0.5) * 40;
+      n.r = 1.2 + n.imp * 3.4 + Math.min(2, n.hits / 60);
+    });
+  } else if (mode === "cluster") {
+    // 球状星团：中心密、外围疏，黄金角铺球面
+    NODES.slice().sort((p, q) => q.imp - p.imp).forEach((n, i) => {
+      const u = (i + 0.5) / N;
+      const phi = Math.acos(1 - 2 * u);
+      const th = 2.399963 * i;
+      const R = 42 + Math.pow(u, 0.55) * 300;
+      n.x = Math.sin(phi) * Math.cos(th) * R;
+      n.y = Math.cos(phi) * R * 0.86;
+      n.z = Math.sin(phi) * Math.sin(th) * R * 0.3;
+      n.r = 1.2 + n.imp * 3.4 + Math.min(2, n.hits / 60);
+    });
+  } else {
+    // 联想网络：Fruchterman-Reingold（斥力 k²/d + 引力 d²/k + 温度退火）
+    NODES.forEach((n, i) => {
+      const ang = i * 2.399963;
+      const rr = 30 + Math.sqrt(i) * 12;
+      n.x = Math.cos(ang) * rr;
+      n.y = Math.sin(ang) * rr;
+      n.z = 0;
+      n.dx = 0; n.dy = 0;
+    });
+    const kk = Math.sqrt((760 * 760) / Math.max(1, N));
+    let temp = 90;
+    const MAXD = 520;
+    for (let it = 0; it < 110; it++) {
+      for (let i = 0; i < N; i++) { NODES[i].dx = 0; NODES[i].dy = 0; }
+      // 斥力
+      for (let i = 0; i < N; i++) {
+        const p = NODES[i];
+        for (let j = i + 1; j < N; j++) {
+          const q = NODES[j];
+          let dx = p.x - q.x, dy = p.y - q.y;
+          let d = Math.hypot(dx, dy);
+          if (d > MAXD) continue;
+          if (d < 0.01) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d = 0.5; }
+          const f = (kk * kk) / d;
+          const ux = dx / d, uy = dy / d;
+          p.dx += ux * f; p.dy += uy * f;
+          q.dx -= ux * f; q.dy -= uy * f;
+        }
+      }
+      // 引力
+      for (let i = 0; i < EDGES.length; i++) {
+        const e = EDGES[i];
+        let dx = e.b.x - e.a.x, dy = e.b.y - e.a.y;
+        let d = Math.hypot(dx, dy) || 0.01;
+        const f = (d * d) / kk * (0.5 + e.w) * 0.035;
+        const ux = dx / d, uy = dy / d;
+        e.a.dx += ux * f; e.a.dy += uy * f;
+        e.b.dx -= ux * f; e.b.dy -= uy * f;
+      }
+      // 位移受限（温度）
+      for (let i = 0; i < N; i++) {
+        const p = NODES[i];
+        const d = Math.hypot(p.dx, p.dy) || 0.01;
+        const lim = Math.min(d, temp);
+        p.x += p.dx / d * lim;
+        p.y += p.dy / d * lim;
+      }
+      temp *= 0.965;
+    }
+    // 居中 + 缩放到画面
+    let mx = 0, my = 0;
+    NODES.forEach(n => { mx += n.x; my += n.y; });
+    mx /= N; my /= N;
+    let far = 1;
+    NODES.forEach(n => {
+      n.x -= mx; n.y -= my;
+      far = Math.max(far, Math.hypot(n.x, n.y));
+    });
+    const sc = 320 / far;
+    NODES.forEach(n => {
+      n.x *= sc; n.y *= sc;
+      n.z = (Math.random() - 0.5) * 24;
+      n.r = 1.2 + n.imp * 3.2 + Math.min(2, n.hits / 60);
+    });
+  }
+  cam.tz = 1; cam.tx = 0; cam.ty = 0;
+  closeCard();
+}
+
+/* ================= 渲染 ================= */
+function loop(ms) {
+  const dt = Math.min(0.05, (ms - lastMs) / 1000 || 0.016);
+  fps = fps * 0.9 + (1 / Math.max(0.001, (ms - lastMs) / 1000 || 1)) * 0.1;
+  lastMs = ms;
+
+  // 相机平滑
+  // 自转：拖动和刚松手时停，其余慢慢转
+  if (!dragging && performance.now() > spinHold) spin += dt * 0.045;
+  cam.z += (cam.tz - cam.z) * Math.min(1, dt * 7);
+  cam.x += (cam.tx - cam.x) * Math.min(1, dt * 7);
+  cam.y += (cam.ty - cam.y) * Math.min(1, dt * 7);
+
+  draw(ms / 1000);
+  document.getElementById("s-fps").textContent = Math.round(fps);
+  requestAnimationFrame(loop);
+}
+
+function proj(n) {
+  const ca = Math.cos(spin), sa = Math.sin(spin);
+  const nx = n.x * ca - n.y * sa;
+  const ny = n.x * sa + n.y * ca;
+  return {
+    x: W / 2 + (nx + cam.x) * cam.z,
+    y: H / 2 + (ny + cam.y) * cam.z,
+    d: 1 + (n.z || 0) / 400
+  };
+}
+
+function draw(t) {
+  ctx.clearRect(0, 0, W, H);
+  // 背景
+  const g = ctx.createRadialGradient(W * 0.5, H * 0.5, 0, W * 0.5, H * 0.5, Math.max(W, H) * 0.75);
+  g.addColorStop(0, "#0a1224");
+  g.addColorStop(0.55, "#060b16");
+  g.addColorStop(1, "#03050b");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.globalCompositeOperation = "lighter";
+
+  // 连线
+  const ea = Math.max(0, Math.min(1, (cam.z - 0.55) / 0.6));
+  if (ea > 0.03) {
+    for (let i = 0; i < EDGES.length; i++) {
+      const e = EDGES[i];
+      const pa = proj(e.a), pb = proj(e.b);
+      const dx = pb.x - pa.x, dy = pb.y - pa.y;
+      if (Math.abs(dx) > W * 1.4 || Math.abs(dy) > H * 1.4) continue;
+      const hot = hover && (hover.id === e.a.id || hover.id === e.b.id);
+      const al = (hot ? 0.42 : 0.035 + e.w * 0.055) * ea;
+      if (al < 0.012) continue;
+      const c = rgb(KINDS[e.a.k].c);
+      ctx.strokeStyle = `rgba(${c[0]},${c[1]},${c[2]},${al.toFixed(3)})`;
+      ctx.lineWidth = hot ? 1.4 : 0.8;
+      ctx.beginPath();
+      ctx.moveTo(pa.x, pa.y);
+      ctx.lineTo(pb.x, pb.y);
+      ctx.stroke();
+    }
+  }
+
+  // 流光：权重高的连线上跑光点，像信号在神经里传
+  if (ea > 0.05) {
+    for (let i = 0; i < EDGES.length; i++) {
+      const e = EDGES[i];
+      if (e.w < 0.5) continue;
+      if (e.ph === undefined) e.ph = Math.random();
+      const pa = proj(e.a), pb = proj(e.b);
+      const dx = pb.x - pa.x, dy = pb.y - pa.y;
+      if (Math.abs(dx) > W * 1.3 || Math.abs(dy) > H * 1.3) continue;
+      const k01 = (t * 0.22 + e.ph) % 1;
+      const x = pa.x + dx * k01, y = pa.y + dy * k01;
+      const c = rgb(KINDS[e.a.k].c);
+      ctx.globalAlpha = 0.55 * ea * (0.4 + e.w * 0.6);
+      ctx.fillStyle = `rgba(220,240,255,.95)`;
+      ctx.beginPath(); ctx.arc(x, y, 1.3, 0, 6.2832); ctx.fill();
+      ctx.globalAlpha = 0.20 * ea;
+      ctx.fillStyle = `rgba(${c[0]},${c[1]},${c[2]},1)`;
+      ctx.beginPath(); ctx.arc(x, y, 3.2, 0, 6.2832); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // 节点
+  const seen = new Set();
+  for (let i = 0; i < NODES.length; i++) {
+    const n = NODES[i];
+    const p = proj(n);
+    if (p.x < -80 || p.x > W + 80 || p.y < -80 || p.y > H + 80) continue;
+    const isHover = hover && hover.id === n.id;
+    const isSel = selected && selected.id === n.id;
+    const life = n.act ? Math.max(0, Math.min(1, 1 - (t - n.act) / 260)) : 0;
+    // 呼吸：每个节点自己的相位，大小 ±16%
+    if (n.ph === undefined) n.ph = Math.random() * 6.2832;
+    const breath = 1 + 0.16 * Math.sin(t * 1.15 + n.ph);
+    let sz = n.r * cam.z * breath * (1 + life * 0.9) * (isHover ? 1.8 : 1);
+    sz = Math.max(2.2, Math.min(30, sz));
+    const spr = sprites[n.k] || sprites.fact;
+    const alpha = Math.max(0.25, Math.min(1, 0.5 + n.imp * 0.6));
+    // 外晕：比本体大 2.2 倍，很淡，拉出层深感
+    ctx.globalAlpha = alpha * p.d * 0.22;
+    ctx.drawImage(spr, p.x - sz * 2.2, p.y - sz * 2.2, sz * 4.4, sz * 4.4);
+    // 本体
+    ctx.globalAlpha = alpha * p.d;
+    ctx.drawImage(spr, p.x - sz, p.y - sz, sz * 2, sz * 2);
+    // 刚被想起：扩散涟漪
+    if (life > 0.05) {
+      ctx.globalAlpha = life * 0.42;
+      ctx.strokeStyle = KINDS[n.k].c;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, sz * (1.4 + 3.4 * (1 - life)), 0, 6.2832);
+      ctx.stroke();
+    }
+    if (isSel || isHover) {
+      ctx.globalAlpha = 0.9;
+      ctx.strokeStyle = "#eaf4ff";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, Math.max(9, sz * 1.5), 0, 6.2832);
+      ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  // 高价值记忆标文字
+  ctx.globalCompositeOperation = "source-over";
+  ctx.font = "11px 'Microsoft YaHei UI'";
+  ctx.textAlign = "center";
+  let shown = 0;
+  const placed = [];
+  // 只给最值得看的几条标字：重要度高、被想起多、或者正被指着
+  const cand = NODES.slice()
+    .sort((p, q) => (q.imp + Math.min(0.5, q.hits / 300)) - (p.imp + Math.min(0.5, p.hits / 300)));
+  for (let i = 0; i < cand.length && shown < 14; i++) {
+    const n = cand[i];
+    const isHov = hover && hover.id === n.id;
+    if (!isHov && n.imp < 0.72 && n.hits < 60) continue;
+    const p = proj(n);
+    if (p.x < 80 || p.x > W - 80 || p.y < 40 || p.y > H - 50) continue;
+    const txt = n.t.length > 12 ? n.t.slice(0, 12) + "…" : n.t;
+    const wd0 = ctx.measureText(txt).width;
+    // 简单避让：和已放下的标签重叠就跳过
+    let clash = false;
+    for (let j = 0; j < placed.length; j++) {
+      const q = placed[j];
+      if (Math.abs(q.x - p.x) < (q.w + wd0) / 2 + 10 && Math.abs(q.y - p.y) < 20) { clash = true; break; }
+    }
+    if (clash && !isHov) continue;
+    placed.push({ x: p.x, y: p.y + 23, w: wd0 });
+    ctx.fillStyle = "rgba(8,14,26,.72)";
+    const wd = ctx.measureText(txt).width;
+    ctx.fillRect(p.x - wd / 2 - 4, p.y + 11, wd + 8, 16);
+    ctx.fillStyle = "rgba(190,215,255,.82)";
+    ctx.fillText(txt, p.x, p.y + 23);
+    shown++;
+  }
+}
+
+/* ================= 交互 ================= */
+function hitTest(mx, my) {
+  let best = null, bd = 18;
+  for (let i = 0; i < NODES.length; i++) {
+    const n = NODES[i], p = proj(n);
+    const d = Math.hypot(p.x - mx, p.y - my);
+    if (d < bd) { bd = d; best = n; }
+  }
+  return best;
+}
+cv.addEventListener("mousemove", e => {
+  const mx = e.clientX, my = e.clientY;
+  hover = hitTest(mx, my);
+  const tip = document.getElementById("tip");
+  if (hover) {
+    tip.style.display = "block";
+    tip.style.left = Math.min(W - 310, mx + 16) + "px";
+    tip.style.top = Math.min(H - 90, my + 14) + "px";
+    tip.innerHTML = `<b style="color:${KINDS[hover.k].c}">${KINDS[hover.k].n}</b>　` +
+      (hover.t.length > 54 ? hover.t.slice(0, 54) + "…" : hover.t);
+    cv.style.cursor = "pointer";
+  } else {
+    tip.style.display = "none";
+    cv.style.cursor = "grab";
+  }
+});
+cv.addEventListener("click", e => {
+  const n = hitTest(e.clientX, e.clientY);
+  if (n) showCard(n); else closeCard();
+});
+cv.addEventListener("wheel", e => {
+  e.preventDefault();
+  cam.tz = Math.max(0.35, Math.min(9, cam.tz * Math.exp(-e.deltaY * 0.0012)));
+}, { passive: false });
+let drag = null;
+cv.addEventListener("mousedown", e => {
+  drag = { x: e.clientX, y: e.clientY, cx: cam.tx, cy: cam.ty };
+  dragging = true;
+  cv.style.cursor = "grabbing";
+});
+window.addEventListener("mouseup", () => {
+  if (drag) spinHold = performance.now() + 4000;   // 松手停 4 秒再自转
+  drag = null; dragging = false; cv.style.cursor = "grab";
+});
+window.addEventListener("mousemove", e => {
+  if (!drag) return;
+  cam.tx = drag.cx + (e.clientX - drag.x);
+  cam.ty = drag.cy + (e.clientY - drag.y);
+});
+
+/* ================= 卡片 / 视图 / 图例 ================= */
+function showCard(n) {
+  selected = n;
+  const c = KINDS[n.k].c;
+  document.getElementById("cardbody").innerHTML =
+    `<h3>${esc(n.t)}</h3>
+     <span class="tag" style="color:${c}">${KINDS[n.k].n}</span>
+     <p>重要度 <b>${Math.round(n.imp * 100)}%</b>　被想起 <b>${n.hits}</b> 次</p>
+     <p>${n.act ? "最近一次 " + ago(n.act) : ""}</p>`;
+  document.getElementById("card").style.display = "block";
+}
+function closeCard() {
+  selected = null;
+  document.getElementById("card").style.display = "none";
+}
+function ago(ts) {
+  const d = Date.now() / 1000 - ts;
+  if (d < 60) return "刚刚";
+  if (d < 3600) return Math.round(d / 60) + " 分钟前";
+  if (d < 86400) return Math.round(d / 3600) + " 小时前";
+  return Math.round(d / 86400) + " 天前";
+}
+function esc(s) { return String(s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+function renderViews() {
+  const box = document.getElementById("views");
+  box.innerHTML = "";
+  VIEWS.forEach(([k, n, tip]) => {
+    const b = document.createElement("button");
+    b.textContent = n;
+    b.title = tip;
+    b.className = (VIEW === k ? "on" : "");
+    b.onclick = () => { layout(k); renderViews(); };
+    box.appendChild(b);
+  });
+}
+function renderLegend() {
+  const box = document.getElementById("legend");
+  const cnt = {};
+  NODES.forEach(n => { cnt[n.k] = (cnt[n.k] || 0) + 1; });
+  box.innerHTML = Object.keys(KINDS).filter(k => cnt[k])
+    .map(k => `<div><span>${KINDS[k].n} ${cnt[k]}</span>
+      <i style="background:${KINDS[k].c};box-shadow:0 0 8px ${KINDS[k].c}"></i></div>`)
+    .join("");
+}
+
+resize();
+load();
+</script>
+</body>
+</html>

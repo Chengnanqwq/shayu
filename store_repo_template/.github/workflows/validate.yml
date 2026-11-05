@@ -1,0 +1,72 @@
+name: validate plugins
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate plugins and index.json
+        run: |
+          python - <<'PY'
+          import ast, json, pathlib, re, sys
+
+          MAX = 256 * 1024
+          NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_\-]{0,60}\.py$")
+          root = pathlib.Path(".")
+          pdir = root / "plugins"
+          bad = []
+
+          files = sorted(p for p in pdir.glob("*.py"))
+          if not files:
+              print("plugins/ 里没有 .py")
+          for f in files:
+              size = f.stat().st_size
+              if size > MAX:
+                  bad.append(f"{f.name}: 太大 {size} > {MAX}")
+              if not NAME_RE.match(f.name):
+                  bad.append(f"{f.name}: 文件名只能是字母数字下划线横线")
+              code = f.read_text(encoding="utf-8-sig", errors="replace")
+              try:
+                  ast.parse(code)
+              except SyntaxError as e:
+                  bad.append(f"{f.name}: 语法错误 第 {e.lineno} 行 {e.msg}")
+                  continue
+              if "def on_message" not in code and "def commands" not in code:
+                  bad.append(f"{f.name}: 找不到 on_message() 或 commands()")
+              print(f"ok {f.name} ({size} B)")
+
+          idx_path = root / "index.json"
+          if not idx_path.exists():
+              bad.append("缺 index.json")
+          else:
+              try:
+                  idx = json.loads(idx_path.read_text(encoding="utf-8-sig"))
+              except Exception as e:
+                  bad.append(f"index.json 不是合法 JSON: {e}")
+                  idx = {"plugins": []}
+              seen = set()
+              for it in idx.get("plugins") or []:
+                  pid = str(it.get("id") or "")
+                  if not pid:
+                      bad.append("index.json 里有一条没 id")
+                      continue
+                  if pid in seen:
+                      bad.append(f"index.json 里 {pid} 重复")
+                  seen.add(pid)
+                  rel = str(it.get("path") or it.get("file") or f"plugins/{pid}.py")
+                  if not (root / rel).exists():
+                      bad.append(f"index.json 指到不存在的文件：{rel}")
+
+          if bad:
+              print("\n".join("FAIL " + b for b in bad))
+              sys.exit(1)
+          print(f"\n全部通过：{len(files)} 个插件")
+          PY

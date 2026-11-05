@@ -1,0 +1,54 @@
+﻿# ── 运行时数据（绝对不能提交）──
+config.json
+settings.json
+soul.json
+brain_memory.json
+session_memory.json
+chat_log.jsonl
+notebook.md
+*.log
+*.jsonl
+logs/
+emotes/
+memories/
+plugins/_removed/
+_removed/
+
+# ── 编译产物 ──
+bin/
+obj/
+dist/
+__pycache__/
+*.pyc
+*.pdb
+*.user
+
+# ── 打包产物与媒体（仓库不放大文件）──
+payload.zip
+payload.dat
+payload/
+runtime/
+snowluma/
+*.mp4
+*.mov
+*.zip
+*.7z
+*.db
+
+# ── 密钥与凭证 ──
+*.key
+*.pem
+id_*
+server_access.json
+.env
+
+# ── 但这两个是随包模板，必须提交 ──
+!ShaYuSetup/payload_src/config.json
+!ShaYuSetup/payload_src/index.json
+!ShaYuSetup/payload_src/tts_config.json
+
+
+# ── 编辑时的备份文件 ──
+*.bak
+*.bak-*
+

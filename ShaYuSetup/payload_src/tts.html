@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><title>傻鱼 · 语音合成</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;color:#dbe9ff;font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;
+    background:
+      radial-gradient(1200px 600px at 15% -10%, rgba(60,120,255,.16), transparent 60%),
+      radial-gradient(900px 500px at 110% 20%, rgba(120,80,255,.12), transparent 60%),
+      #070b14;padding:28px 20px 60px}
+  .wrap{max-width:1080px;margin:0 auto}
+  h1{font-size:20px;margin:0 0 4px;letter-spacing:2px;color:#eaf6ff;display:flex;align-items:center;gap:10px}
+  h1 .dot{width:9px;height:9px;border-radius:50%;background:#4fe08a;box-shadow:0 0 12px #4fe08a}
+  .sub{color:#5f7ea9;font-size:12px;letter-spacing:1px;margin:0 0 18px 20px}
+  .card{background:linear-gradient(180deg,rgba(16,26,46,.92),rgba(10,17,31,.92));
+    border:1px solid #1c2c49;border-radius:14px;padding:16px 18px;margin-bottom:14px;
+    box-shadow:0 10px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(120,180,255,.06)}
+  .card h2{font-size:12px;letter-spacing:2px;color:#7fa3d8;margin:0 0 12px;font-weight:600;
+    display:flex;align-items:center;gap:8px}
+  .card h2:before{content:"";width:3px;height:12px;border-radius:2px;background:linear-gradient(180deg,#6fd3ff,#3a6dff)}
+  label{font-size:12px;color:#7089ad;display:block;margin:10px 0 5px}
+  input,textarea,select{width:100%;background:#0a1220;color:#dbe9ff;border:1px solid #22355e;
+    border-radius:9px;padding:8px 10px;font:13px/1.6 Consolas,"Microsoft YaHei",monospace;outline:none;
+    transition:border-color .15s, box-shadow .15s}
+  input:focus,textarea:focus,select:focus{border-color:#3b6aa8;box-shadow:0 0 0 3px rgba(60,120,200,.14)}
+  textarea{min-height:96px;resize:vertical}
+  button{background:linear-gradient(135deg,#1e4a7a,#173a63);color:#cfeeff;border:1px solid #2a5f96;
+    border-radius:9px;padding:8px 15px;cursor:pointer;font-size:13px;margin:8px 6px 0 0;
+    transition:transform .08s, background .15s, box-shadow .15s}
+  button:hover{background:linear-gradient(135deg,#27629e,#1b4778);box-shadow:0 4px 16px rgba(50,130,220,.25)}
+  button:active{transform:translateY(1px)}
+  .row{display:flex;gap:12px;flex-wrap:wrap}.row>*{flex:1;min-width:220px}
+  .tabs{display:flex;gap:8px;margin:2px 0 12px;flex-wrap:wrap}
+  .tabs button{border-radius:20px;padding:6px 16px;background:#0d1729;border:1px solid #1c2c49;color:#6f8fc4}
+  .tabs button.on{background:linear-gradient(135deg,#1f4f86,#16365e);color:#dff0ff;border-color:#3b6aa8;
+    box-shadow:0 0 18px rgba(60,130,230,.25)}
+  .hide{display:none}
+  pre{background:#070c16;border:1px solid #16233c;border-radius:10px;padding:10px 12px;font-size:12px;
+    white-space:pre-wrap;max-height:240px;overflow:auto;color:#9fc2e8}
+  .muted{color:#5c7398;font-size:12px;margin-left:8px}
+  .hint{color:#54729c;font-size:11px;margin-top:6px}
+  audio{width:100%;margin-top:10px;filter:invert(.9) hue-rotate(180deg);border-radius:10px}
+  .badge{display:inline-block;font-size:11px;color:#7fd0ff;border:1px solid #2a4a7a;border-radius:20px;
+    padding:2px 10px;margin-left:8px;background:rgba(30,70,120,.25)}
+</style>></head><body>
+<div class="wrap"><h1><span class="dot"></span>语音合成 · TTS<span class="badge" id="badge">MiMo</span></h1><p class="sub">原文直发 · 三模式 · 试合成</p>
+
+<div class="card">
+  <div class="row">
+    <div><label>接口地址 base_url</label><input id="base"></div>
+    <div><label>密钥 {{api_key}}</label><input id="key" type="password"></div>
+  </div>
+  <div class="row">
+    <div><label>模型</label><select id="model"></select><input id="model-manual" placeholder="或手填模型 id，例如 mimo-v2.5-tts" style="margin-top:6px"></div>
+    <div><label>默认模式</label><select id="mode">
+      <option value="chat">文字提示语音</option><option value="preset">预设音色</option>
+      <option value="clone">语音克隆</option></select></div>
+  </div>
+  <button onclick="fetchModels()">拉取模型</button>
+  <button onclick="save()">保存</button>
+  <button onclick="check()">检查</button>
+  <span class="muted" id="msg"></span>
+</div>
+
+<div class="card">
+  <div class="tabs">
+    <button id="t-chat" onclick="tab('chat')">文字提示语音</button>
+    <button id="t-preset" onclick="tab('preset')">预设音色</button>
+    <button id="t-clone" onclick="tab('clone')">语音克隆</button>
+  </div>
+  <div id="pane-chat" class="pane">
+    <label>路径</label><input id="chat-path">
+    <label>请求头（一行一个，原样发送）</label><textarea id="chat-headers"></textarea>
+    <label>声音描述（{{voice}}，给 voicedesign 模型用）</label><input id="chat-voice" placeholder="例如：少女偏萝莉，软糯清亮，语速稍快">
+    <label>请求体（占位符 {{text}} {{model}} {{api_key}} {{voice}}，原样发送）</label><textarea id="chat-body"></textarea>
+  </div>
+  <div id="pane-preset" class="pane hide">
+    <label>路径</label><input id="preset-path">
+    <label>请求头</label><textarea id="preset-headers"></textarea>
+    <label>请求体（多一个 {{voice}}）</label><textarea id="preset-body"></textarea>
+    <label>官方音色（中文名）</label><select id="preset-voice"></select>
+    <button onclick="testWith('preset')">用这个音色试听</button>
+  </div>
+  <div id="pane-clone" class="pane hide">
+    <label>路径</label><input id="clone-path">
+    <label>请求头</label><textarea id="clone-headers"></textarea>
+    <label>请求体（多一个 {{voice}}）</label><textarea id="clone-body"></textarea>
+    <label>克隆音色 ID</label><input id="clone-voice">
+    <hr style="border-color:#1b2b47">
+    <label>上传克隆样本（wav/mp3）</label><input id="clone-file" type="file" accept="audio/*">
+    <button onclick="uploadSample()">上传样本</button>
+    <button onclick="testWith('clone')">用样本试听（voice 传样本 base64）</button>
+    <div class="muted" id="clone-msg"></div>
+  </div>
+</div>
+
+<div class="card">
+  <label>试合成</label><textarea id="test-text">你好呀，我是傻鱼，今天也要吃白米饭。</textarea>
+  <button onclick="testWith(cur)">合成并播放</button>
+  <div class="muted" id="test-msg"></div>
+  <audio id="player" controls style="width:100%;margin-top:8px"></audio>
+</div>
+
+<pre id="out"></pre>
+
+<script>
+var cfg = null, cur = 'chat';
+function $(id){return document.getElementById(id)}
+function show(t){$('msg').textContent=t;$('out').textContent=t}
+function tab(m){
+  cur=m;
+  ['chat','preset','clone'].forEach(function(k){
+    $('pane-'+k).classList.toggle('hide', k!==m);
+    $('t-'+k).classList.toggle('on', k===m);
+  });
+}
+async function j(url, opt){var r=await fetch(url,opt);return r.json()}
+async function load(){
+  cfg = await j('/api/tts/config');
+  $('base').value = cfg.base_url||''; $('key').value = cfg.api_key||'';
+  $('mode').value = cfg.mode||'chat';
+  fillModels(cfg.models||[]);
+  var m = cfg.modes||{};
+  $('chat-path').value=m.chat.path; $('chat-headers').value=m.chat.headers; $('chat-body').value=m.chat.body;
+  $('chat-voice').value=m.chat.voice||'';
+  $('preset-path').value=m.preset.path; $('preset-headers').value=m.preset.headers; $('preset-body').value=m.preset.body;
+  var vs = m.preset.voices || [];
+  var sel = $('preset-voice'); sel.innerHTML = '';
+  vs.forEach(function(v){var o=document.createElement('option');o.value=v;o.textContent=v;sel.appendChild(o)});
+  if(m.preset.voice && vs.indexOf(m.preset.voice) < 0){var o=document.createElement('option');o.value=m.preset.voice;o.textContent=m.preset.voice;sel.appendChild(o)}
+  sel.value = m.preset.voice || (vs[0]||'');
+  $('clone-path').value=m.clone.path; $('clone-headers').value=m.clone.headers; $('clone-body').value=m.clone.body;
+  $('clone-voice').value=m.clone.voice||'';
+  tab(cfg.mode||'chat');
+}
+function fillModels(ids){
+  var s=$('model'); s.innerHTML='';
+  (ids||[]).forEach(function(id){var o=document.createElement('option');o.value=id;o.textContent=id;s.appendChild(o)});
+  if(cfg && cfg.model){s.value=cfg.model}
+  if(cfg && cfg.model && ids.indexOf(cfg.model)<0){$('model-manual').value=cfg.model}
+}
+function collect(){
+  cfg.base_url=$('base').value.trim(); cfg.api_key=$('key').value.trim();
+  var manual=$('model-manual').value.trim();
+  cfg.model=manual || $('model').value; cfg.mode=$('mode').value;
+  var m=cfg.modes;
+  m.chat.path=$('chat-path').value;m.chat.headers=$('chat-headers').value;m.chat.body=$('chat-body').value;
+  m.chat.voice=$('chat-voice').value.trim();
+  m.preset.path=$('preset-path').value;m.preset.headers=$('preset-headers').value;m.preset.body=$('preset-body').value;
+  m.preset.voice=$('preset-voice').value.trim();
+  m.clone.path=$('clone-path').value;m.clone.headers=$('clone-headers').value;m.clone.body=$('clone-body').value;
+  m.clone.voice=$('clone-voice').value.trim();
+  return cfg;
+}
+async function save(){
+  try{
+    if(!cfg){ await load(); }
+    if(!cfg || !cfg.modes){ show('配置没加载出来，按 Ctrl+F5 刷新页面再试'); return; }
+    var r=await j('/api/tts/config',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(collect())});
+    if(r.ok){ show('服务器收到：key 长度 '+(r.key_len===undefined?'?':r.key_len)+'，模型数 '+(r.models||0)+'，模式 '+(r.mode||'')+'（页面输入框里是 '+$('key').value.trim().length+'）'); if(0){ var k=$('key').value.trim(); show('已保存：key 长度 '+k.length+'，模型 '+
+      ($('model-manual').value.trim() || $('model').value || '未选')+'，三套原文已落盘'); } }
+    else { show('保存失败: '+(r.error||'未知')); }
+  }catch(e){ show('保存出错: '+e.message); }
+}
+window.onerror=function(m){ var el=document.getElementById('msg'); if(el){el.textContent='页面脚本错误: '+m} };
+async function check(){
+  var r=await j('/api/tts/check',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(collect())});
+  show(r.ok?('检查通过\n'+r.preview):'检查失败: '+r.error);
+}
+async function fetchModels(){
+  await save();
+  var r=await j('/api/tts/models',{method:'POST'});
+  if(r.ok && r.models && r.models.length){cfg.models=r.models;fillModels(r.models);show('拉到 '+r.models.length+' 个模型')}
+  else {
+    var fallback=["mimo-v2.5-tts","mimo-v2.5-tts-voiceclone","mimo-v2.5-tts-voicedesign"];
+    cfg.models=fallback; fillModels(fallback);
+    show('拉取失败：'+(r.error||'未知')+'。已用内置 TTS 模型列表，也可以在下面手填模型 id');
+  }
+}
+async function uploadSample(){
+  var f=$('clone-file').files[0]; if(!f){$('clone-msg').textContent='先选文件';return}
+  var b64=await new Promise(function(res,rej){var fr=new FileReader();fr.onload=function(){res(fr.result)};fr.onerror=rej;fr.readAsDataURL(f)});
+  var r=await j('/api/tts/sample',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:f.name,data:b64})});
+  if(r.ok && cfg && cfg.modes && cfg.modes.clone){ cfg.modes.clone.sample = r.path; }
+  $('clone-msg').textContent=r.ok?('已上传 '+r.bytes+' 字节，样本已绑定'):('失败: '+r.error);
+}
+async function makeVoice(){
+  await save();
+  var r=await j('/api/tts/clone',{method:'POST'});
+  $('clone-msg').textContent=r.ok?('音色: '+(r.voice||'(接口没返回 id)')+'\n'+r.raw):('失败: '+r.error);
+  if(r.ok&&r.voice){$('clone-voice').value=r.voice}
+}
+async function testWith(mode){
+  await save();
+  $('test-msg').textContent='合成中…';
+  var r=await j('/api/tts/test',{method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({text:$('test-text').value,mode:mode||cur})});
+  if(r.ok){$('player').src='/api/tts/audio?name='+encodeURIComponent(r.name);$('player').play();
+    $('test-msg').textContent='合成成功 '+r.bytes+' 字节'}
+  else {$('test-msg').textContent='失败: '+r.error}
+}
+load();
+</script></div></body></html>

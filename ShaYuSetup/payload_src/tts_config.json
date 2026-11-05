@@ -1,0 +1,42 @@
+{
+  "base_url": "https://api.xiaomimimo.com/v1",
+  "api_key": "",
+  "model": "mimo-v2.5-tts-voicedesign",
+  "models": [],
+  "mode": "chat",
+  "timeout": 120,
+  "modes": {
+    "chat": {
+      "path": "/chat/completions",
+      "headers": "Content-Type: application/json\napi-key: {{api_key}}",
+      "body": "{\"model\":\"{{model}}\",\"messages\":[{\"role\":\"assistant\",\"content\":\"{{text}}\"}],\"audio\":{\"format\":\"mp3\",\"voice\":\"{{voice}}\"}}",
+      "voice": "少女音，软糯清亮，语速稍快，带一点撒娇的鼻音"
+    },
+    "preset": {
+      "path": "/chat/completions",
+      "headers": "Content-Type: application/json\napi-key: {{api_key}}",
+      "body": "{\"model\":\"{{model}}\",\"messages\":[{\"role\":\"assistant\",\"content\":\"{{text}}\"}],\"audio\":{\"format\":\"mp3\",\"voice\":\"{{voice}}\"}}",
+      "voice": "冰糖",
+      "voices": [
+        "mimo_default",
+        "冰糖",
+        "茉莉",
+        "苏打",
+        "白桦",
+        "Mia",
+        "Chloe",
+        "Milo",
+        "Dean"
+      ]
+    },
+    "clone": {
+      "path": "/chat/completions",
+      "headers": "Content-Type: application/json\napi-key: {{api_key}}",
+      "body": "{\"model\":\"{{model}}\",\"messages\":[{\"role\":\"assistant\",\"content\":\"{{text}}\"}],\"audio\":{\"format\":\"mp3\",\"voice\":\"{{sample_b64}}\"}}",
+      "voice": "",
+      "sample": "",
+      "clone_path": "",
+      "clone_headers": ""
+    }
+  }
+}

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationIcon>icon.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="icon.ico" LogicalName="ShaYuSetup.icon.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- payload 内嵌进 exe，出来的就是单个文件；payload.dat 由 build_payload.ps1 生成 -->
+    <EmbeddedResource Include="payload.dat" Condition="Exists('payload.dat')"
+                      LogicalName="ShaYuSetup.payload.zip" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Text.Encoding.CodePages" Version="10.0.14" />
+  </ItemGroup>
+</Project>
