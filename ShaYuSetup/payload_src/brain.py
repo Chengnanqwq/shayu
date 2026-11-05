@@ -831,6 +831,12 @@ class Brain:
 
     # ------------------------------------------------------------ 情绪
 
+    EVENT_WORDS = ("失业", "被裁", "裁员", "住院", "生病", "发烧", "去世", "走了", "手术",
+                   "分手", "离婚", "吵架", "被骂", "失恋", "离职", "考试", "面试", "搬家",
+                   "欠钱", "车祸", "抑郁", "失眠", "哭")
+    PEOPLE_WORDS = ("我妈", "我爸", "我哥", "我姐", "我弟", "我妹", "我对象", "我女朋友",
+                    "我男朋友", "我老婆", "我老公", "我朋友", "我同事", "我领导", "我老板")
+
     POS_WORDS = ("喜欢", "爱", "开心", "哈哈", "谢谢", "可爱", "乖", "亲", "抱", "好耶",
                  "厉害", "棒", "想你", "陪你", "夸", "对了", "好呀", "可以", "舒服", "温柔")
     NEG_WORDS = ("滚", "傻", "笨", "烦", "气死", "骂", "恶心", "讨厌", "闭嘴", "怼",
@@ -860,6 +866,16 @@ class Brain:
             self._dirty = True
 
             text = _norm(u)[:40]
+            # EVENT_1106：近况类事件（失业、住院、被骂……）不管长短都进长期记忆。
+            # 以前只按长度判断，导致「我妈住院了」这种最重要的话反而被当闲聊丢掉。
+            _event = next((w for w in self.EVENT_WORDS if w in u), "")
+            if _event and not u.strip().startswith("@") and "CQ:" not in u:
+                self._add_locked(u[:80], session, "event", "event", 0.86,
+                                 ["近况", _event], "")
+                _who = next((w for w in self.PEOPLE_WORDS if w in u), "")
+                if _who:
+                    self._add_locked(f"{_who}的事：{u[:60]}", session, "event", "event", 0.8,
+                                     ["人物", _who], _who)
             if (len(text) >= 15 and not u.strip().startswith("@")
                     and "CQ:" not in u and not _is_noise(u)):
                 self._add_locked(u[:60], session, "work", "work", 0.22,

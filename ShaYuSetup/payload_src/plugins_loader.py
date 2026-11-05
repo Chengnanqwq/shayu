@@ -66,6 +66,7 @@ _ON_KEYS = ("ENABLED", "ENABLE", "ACTIVE", "enabled")
 _OFF_KEYS = ("DISABLED", "disabled")
 _MSG_HOOKS = ("on_message", "handle", "on_msg", "handle_message", "on_event", "run")
 _INIT_HOOKS = ("setup", "register", "on_load", "init")
+_REPLY_HOOKS = ("on_reply", "rewrite_reply", "post_reply")
 _CMD_HOOKS = ("commands", "get_commands", "COMMANDS", "CMDS", "cmd_list")
 
 _LOADED: list[dict] = []
@@ -378,7 +379,7 @@ def load_all(verbose: bool = True) -> int:
             target = _target_of(mod)
             rec["target"] = target
             rec["commands"] = _commands_of(mod, target)
-            rec["hooks"] = [h for h in _MSG_HOOKS
+            rec["hooks"] = [h for h in (_MSG_HOOKS + _REPLY_HOOKS)
                             if callable(getattr(target, h, None) if not isinstance(target, dict)
                                         else target.get(h))]
 
@@ -470,6 +471,65 @@ async def dispatch(ctx: dict) -> bool:
             if "--plugin-debug" in sys.argv:
                 print(traceback.format_exc()[-800:], flush=True)
     return False
+
+
+async def dispatch_reply(ans: str, ctx: dict | None = None) -> str:
+    """让插件改写最终回复（出口钩子）。
+
+    每个插件都可以实现 on_reply(ans, ctx) -> str；按加载顺序串起来，
+    任何一个抛异常就跳过它，不影响别的插件，也不影响这条消息本身。
+    """
+    if not _READY:
+        load_all(verbose=False)
+    out = ans
+    c = _wrap_ctx(ctx or {})
+    for p in _LOADED:
+        if not p["enabled"]:
+            continue
+        target = p["target"] or p["module"]
+        fn = _hook(target, _REPLY_HOOKS)
+        if not callable(fn):
+            continue
+        try:
+            r = await asyncio.wait_for(_call_any(fn, {**c, "reply": out, "text": out}), timeout=8)
+            if isinstance(r, str) and r.strip():
+                out = r
+            elif isinstance(r, tuple) and r and isinstance(r[0], str) and r[0].strip():
+                out = r[0]
+        except Exception as e:
+            p["error"] = f"on_reply: {type(e).__name__}: {e}"
+    return out
+
+
+def dispatch_reply_sync(ans: str, ctx: dict | None = None) -> str:
+    """同步版出口钩子（HTTP 线程里用）。只调同步插件，异步插件跳过。"""
+    if not _READY:
+        load_all(verbose=False)
+    out = ans
+    c = _wrap_ctx(ctx or {})
+    for p in _LOADED:
+        if not p["enabled"]:
+            continue
+        target = p["target"] or p["module"]
+        fn = _hook(target, _REPLY_HOOKS)
+        if not callable(fn):
+            continue
+        try:
+            r = fn({**c, "reply": out, "text": out})
+            if inspect.isawaitable(r):
+                continue
+            if isinstance(r, str) and r.strip():
+                out = r
+        except TypeError:
+            try:
+                r = fn(out)
+                if isinstance(r, str) and r.strip():
+                    out = r
+            except Exception as e:
+                p["error"] = f"on_reply: {type(e).__name__}: {e}"
+        except Exception as e:
+            p["error"] = f"on_reply: {type(e).__name__}: {e}"
+    return out
 
 
 def reload_plugin(identifier: str) -> bool:

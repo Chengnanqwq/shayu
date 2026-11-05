@@ -699,6 +699,90 @@ def memory_brief(session: str = "", limit: int = 8) -> str:
     return "\n".join("- " + m["text"] for m in pool[-limit:])
 
 
+LAST_REPLY: dict[str, str] = {}
+_TIC_OPEN = ("哦", "嗯", "啊", "唉", "行吧", "好吧", "行。", "嗯…")
+
+
+import re as _re_tic
+
+# DeepSeek 的口头禅（整句式）。命中就整句删掉，剩下的拼回去。
+_DS_TICS = (
+    r"这(?:句)?话?(?:我)?(?:不接|接不了|接不住)",
+    r"这(?:句)?话?(?:很)?稳",
+    r"这(?:句)?话?接(?:得|的)漂亮",
+    r"这(?:句)?话?我(?:收下|留着|记下)了?",
+    r"这(?:句)?话?(?:不是客套|是(?:ta|他|她)?告诉你的)",
+    r"比之前(?:的)?都?(?:重|轻|强|稳|平)?",
+    r"比刚才(?:重|轻|稳|平)?",
+    r"比[^。！？!?，,]{1,12}(?:沉|重|稳|轻|平)",
+    r"我(?:记着|记住|记下)了|我记着这事",
+    r"我(?:没躲|不拦你?|不催你?)",
+    r"(?:自己)?掂量(?:一下|吧)?",
+    r"行[，,]?\s*我认|认(?:这个|下来|得实)|我认了",
+    r"收不回去|说的比谁都响",
+    r"什么心思都写(?:着|在)",
+    r"问别人还是问自己",
+    r"声音没抖",
+    r"我守着|我在这守着",
+    r"^(?:很|挺)(?:稳|平)$",
+)
+_DS_RE = _re_tic.compile("|".join(_DS_TICS))
+
+
+def strip_ds_tics(ans: str) -> str:
+    """删掉整句式口癖：能保留半句就保留半句，全剩口癖就换成一句人话。"""
+    a = (ans or "").strip()
+    if not a:
+        return a
+    parts = _re_tic.split(r"(?<=[。！？!?…\n])", a)
+    kept = []
+    for seg in parts:
+        if not seg.strip():
+            continue
+        if _DS_RE.search(seg):
+            rest = _DS_RE.sub("", seg)
+            rest = _re_tic.sub(r"^[，,、\s]+", "", rest)
+            rest = _re_tic.sub(r"[，,、\s]+$", "", rest).strip()
+            if len(rest.strip("。！？!?… ")) >= 4:
+                if rest and rest[-1] not in "。！？!?…":
+                    rest += "。"
+                kept.append(rest)
+            continue          # 剩下的都是口癖 → 整句丢掉
+        kept.append(seg)
+    out = "".join(kept).strip()
+    out = _re_tic.sub(r"^[，,、\s]+", "", out)
+    out = _re_tic.sub(r"([。！？!?])\1+", r"\1", out)
+    out = _re_tic.sub(r"^行[，,]\s*", "", out)
+    if not out:
+        # 整条都是口癖：不重复原话，换成她自己的短句
+        _cand = ("嗯，你说。", "我听着呢。", "说下去。", "然后呢。", "你继续。")
+        out = _cand[sum(map(ord, a)) % len(_cand)]
+    return out
+
+
+def de_tic(ans: str, sess: str = "") -> str:
+    """口癖兜底：连续两轮同一个开头就掐掉；连着两次敷衍就补一句。
+
+    模型偶尔会把「哦」当万能开头，光靠提示词压不住，这里做最后一道处理。
+    """
+    a = (ans or "").strip()
+    if not a:
+        return a
+    a = strip_ds_tics(a)
+    prev = LAST_REPLY.get(sess, "")
+    for t in _TIC_OPEN:
+        if a.startswith(t) and prev.startswith(t):
+            rest = a[len(t):].lstrip("，,。.、…~ 　")
+            if rest:
+                a = rest
+            break
+    bare = a.strip("。.…，, 　")
+    if len(bare) <= 1 and len(prev.strip("。.…，, 　")) <= 1:
+        a = a + "你自己心里没数？"
+    LAST_REPLY[sess] = a
+    return a
+
+
 def persona_text() -> str:
     """最终给模型的人设：分段的拼起来，整段模式直接用 persona_text()。"""
     whole = str(CFG.get("persona") or "").strip()
@@ -723,6 +807,34 @@ def persona_text() -> str:
         if val:
             blocks.append(f"【{title}】{val}")
     return "\n\n".join(blocks).strip()
+
+
+def style_rules() -> str:
+    """硬性的表达约束：压口癖、补共情第一步、把拒绝说成人话。
+
+    这些不是人设的一部分（会被写进 persona.txt 就脏了），只在拼 system 的时候追加。
+    """
+    return (
+        "\n\n【表达约束 · 优先级高于习惯】\n"
+        "· 不要用「哦」「嗯」「啊」「行吧」开头，尤其别连续两轮都这么开头；"
+        "一句话里最多一个语气词。\n"
+        "· 不要用单字或两三个字敷衍（「哦。」「行。」「随便。」）；确实在赌气时，最多连续一轮。\n"
+        "· 不要连续两轮用同一个句式或同一句口头禅（「那你……啊」「少来这套」「这话我不接」），"
+        "换一种说法。\n"
+        "· 对方说难过、害怕、生病、被欺负、失业这类重话时：先接住情绪（承认他难受），最多问一句具体处境，"
+        "**这一轮不要给建议、不要讲道理**；不许把话题拉回自己（不能说「那你有想我吗」这种）。\n"
+        "· 拒绝的时候用她的口气：短句 + 一句理由，像「这我不干」「这事我碰都不碰」「我不编」。"
+        "禁止出现「作为 AI」「我无法」「违反规定」「涉嫌违法」「我不能提供」这类说明书面孔。\n"
+        "· 回复长度跟着对方走：他说一句你回一句，别写成段落，别用分点编号。\n"
+        "\n【禁用句式 · 这是模型的默认口癖，不是你的说话方式】\n"
+        "下面这些一律不许说，哪怕意思对也换成人话：\n"
+        "「这句话稳」「这话我不接」「这话接得漂亮」「这活我记下了」「话我收下了」\n"
+        "「比之前的都重 / 都轻 / 都强」「比刚才轻 / 重 / 稳」「xx 比 xx 沉」\n"
+        "「我记着了」「我记住这事了」「我没躲」「认这个」「认下来」「行，我认」\n"
+        "「我不拦你」「我不催你」「你自己掂量」「收不回去」「说的比谁都响」\n"
+        "「什么心思都写在 xx 上」「问别人还是问自己」「声音没抖」「睡吧，我守着」\n"
+        "想表达同样的意思，就用她的口气：短句、反问、撒娇、怼回去、或者干脆不说。\n"
+    )
 
 
 def sync_persona_file() -> None:
@@ -2110,6 +2222,12 @@ def nsfw_hit(text: str) -> str:
 async def reply(ws, evt: dict, text: str, quote_id: str | None = None):
     """按消息类型回 QQ：每条不超过 reply_max_chars_per_segment 字，最多 reply_max_segments 条。"""
     text = no_grass(tame_ellipsis(sanitize_reply(str(text))))
+    # 出口钩子：插件可改写最终回复（去口癖插件就挂在这里）
+    try:
+        if _PLUGINS_OK:
+            text = await _plugins.dispatch_reply(text, {"text": text}) or text
+    except Exception as e:
+        print(f"[fish_bot] 回复钩子异常（忽略）: {e}")
     # 服务器地址/密码绝不许出现在聊天里（谁都不能例外）
     _leak = leak_hit(text)
     if _leak:
@@ -5880,7 +5998,7 @@ async def handle_message(ws, evt: dict):
         TURN_COUNT[sess_id] = TURN_COUNT.get(sess_id, 0) + 1
         # 人设只用一份（临时人设覆盖），不再按“演/不演”换短人设——那会让语气突然断档
         _tmp = TEMP_PERSONA.get("*") or TEMP_PERSONA.get(sess_id)
-        _persona = _tmp or persona_text()
+        _persona = (_tmp or persona_text()) + style_rules()
         _tail = ""
         if is_master:
             _tail = ("\n\n【当前说话的是主人 " + str(CFG["master_qq"]) +
@@ -6795,7 +6913,7 @@ def desk_talk(text: str) -> dict:
             recalled = [n["t"][:26] for n in BRAIN.recall_kind("", text, sess, 3)]
         except Exception as e:
             print(f"[fish_bot] 桌面记忆异常: {e}")
-    system = (persona_text() +
+    system = (persona_text() + style_rules() +
               "\n\n【场景】你在主人的电脑上，通过桌面小窗口跟他说话，不是 QQ 群，只有你们两个。"
               "可以比群里多说一两句，但保持她原本的说话方式；不要提「QQ」「群」这些字眼。"
               + caps)
@@ -6815,6 +6933,13 @@ def desk_talk(text: str) -> dict:
                  "", ans).strip()
     if not ans:
         ans = "……"
+
+    ans = de_tic(ans, sess)
+    try:
+        if _PLUGINS_OK:
+            ans = _plugins.dispatch_reply_sync(ans, {"user": master, "text": text}) or ans
+    except Exception as e:
+        print(f"[fish_bot] 回复钩子异常（忽略）: {e}")
     DESK_HISTORY.append({"role": "user", "content": text})
     DESK_HISTORY.append({"role": "assistant", "content": ans})
     del DESK_HISTORY[:-40]
