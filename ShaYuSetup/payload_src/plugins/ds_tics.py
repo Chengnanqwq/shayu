@@ -14,7 +14,7 @@
 """
 
 NAME = "去 DS 口癖"
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 DESC = "删掉模型自带的「这句话稳/我不接/比之前的都重」这类口头禅，让回复回到她的口气"
 AUTHOR = "ShaYu"
 ENABLED = True
@@ -83,6 +83,8 @@ def clean(text: str) -> str:
 
 def de_tic(text: str) -> str:
     """顺带压单字敷衍和连续同开头。"""
+    if (text or "").strip("。.…，, 　") == "":
+        return text          # 「……」这类占位回复，原样放过
     a = clean(text)
     prev = STATE["last"]
     for t in FILLER_OPEN:

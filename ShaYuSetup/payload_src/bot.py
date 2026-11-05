@@ -768,6 +768,9 @@ def de_tic(ans: str, sess: str = "") -> str:
     a = (ans or "").strip()
     if not a:
         return a
+    # 模型没通或没话说时的占位回复，别在它后面接废话
+    if a.strip("。.…，, 　") == "":
+        return a
     a = strip_ds_tics(a)
     prev = LAST_REPLY.get(sess, "")
     for t in _TIC_OPEN:

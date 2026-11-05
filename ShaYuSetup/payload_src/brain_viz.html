@@ -1304,7 +1304,9 @@ function draw(now) {
   var graphAlpha = showMemory ? Math.max(0, Math.min(1, (cam.dist - 0.85) / 0.75)) : 0;
 
   // ---- 星系群（垫在最底下）----
-  if (showMemory && graphAlpha > 0.05) drawGalaxies(ctx, graphAlpha, tNow);
+  // SPIRAL_ONLY_1106：螺旋模式下没有"一个类型一个星系"了，云团和环绕圈都不画
+  if (showMemory && graphAlpha > 0.05 && LAYOUT !== "galaxy") drawGalaxies(ctx, graphAlpha, tNow);
+  else if (LAYOUT === "galaxy") G._labels = [];
   else G._labels = [];   // 记忆层关掉时也要清，否则会点到上一帧的"隐形"星系名
 
   // 装饰光点：先铺底，真实记忆画在上面
