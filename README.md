@@ -10,13 +10,13 @@
 
 |  |  |
 |---|---|
-| **[傻鱼安装包 v0.012（114 MB）](https://github.com/Chengnanqwq/shayu/releases/download/v0.012/ShaYu-Setup-v0.012.exe)** | Windows 10 / 11 64 位 · 单文件自包含 · 自带运行时与协议端 |
+| **[傻鱼安装包 v0.014（114 MB）](https://github.com/Chengnanqwq/shayu/releases/download/v0.014/ShaYu-Setup-v0.014.exe)** | Windows 10 / 11 64 位 · 单文件自包含 · 自带运行时与协议端 |
 | [全部版本 / 更新记录](https://github.com/Chengnanqwq/shayu/releases) | 最新版永远在 Releases 里 |
 | [使用教程（docx）](docs/傻鱼使用教程.docx) | 从装到用，含每一步截图 |
 | [插件商店仓库](https://github.com/Chengnanqwq/shayu-plugins) | 装完在面板里直接能看到 |
 
 > 安装时请选**英文、无空格的路径**（例如 `D:\ShaYu`），约 300 MB；
-> 校验：`SHA256 = 29EA2574F7393E17F8957A17C7DFECBC3DAF9261B6D89C02498770003C8CA251`
+> 校验：`SHA256 = 9FA66137975154B26E6DB211B92DB4ABAAA8982EA1E261965916D8B10A59E2DB`
 
 
 
