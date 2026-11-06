@@ -745,6 +745,22 @@ def start_timers(loop=None) -> None:
         print(f"[plugins] 定时任务启动失败: {e}", flush=True)
 
 
+def aux_providers() -> list:
+    """AUX_PLUGIN_1106：谁定义了 aux_chat(...)，谁就能当「副模」（判说话对象、记忆提炼这种杂活）。
+
+    主程序那边会用 → 插件 → 配置 → 主模型 的顺序退，所以插件坏了也不影响聊天。
+    """
+    out = []
+    for p in _LOADED:
+        if not p.get("enabled"):
+            continue
+        mod = p.get("module")
+        fn = getattr(mod, "aux_chat", None) if mod is not None else None
+        if callable(fn):
+            out.append(fn)
+    return sorted(out, key=lambda f: getattr(f, "__module__", ""))
+
+
 def ui_payload() -> list[dict]:
     """面板要注入的 UI：每个插件返回 {name, css, html, js}。
 

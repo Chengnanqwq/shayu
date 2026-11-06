@@ -375,6 +375,100 @@ ONEBOT_API = int(os.environ.get("FISH_API_PORT") or CFG.get("api_port", 3000))
 WS_HOST = str(os.environ.get("FISH_WS_HOST") or CFG.get("ws_host") or "127.0.0.1")
 
 # ============ LLM（OpenAI 兼容，可换任意服务） ============
+# ---- 记忆副模（AUX_1106）--------------------------------------------------
+# 「这句话是说给谁的」「这条值不值得记」「两句话是不是同一件事」这类杂活，
+# 不需要主模型，交给一个便宜的/免费的小模型就行：省 token、也不占主模型的响应时间。
+# 没配副模（或额度用完、调不通）就自动退回主模型，行为不变。
+_AUX = {"win": 0, "used": 0, "fail": 0}
+
+
+def aux_ready() -> bool:
+    base = str(CFG.get("mem_llm_base") or "").strip()
+    model = str(CFG.get("mem_llm_model") or "").strip()
+    return bool(CFG.get("mem_llm_enabled") and base and model)
+
+
+def _aux_budget_ok() -> bool:
+    try:
+        cap = int(CFG.get("mem_llm_budget_per_hour", 60) or 0)
+    except Exception:
+        cap = 60
+    if cap <= 0:
+        return True
+    win = int(time.time() // 3600)
+    if _AUX.get("win") != win:
+        _AUX.update(win=win, used=0)
+    if _AUX["used"] >= cap:
+        return False
+    _AUX["used"] += 1
+    return True
+
+
+def _aux_plugin_provider():
+    """AUX_PLUGIN_1106：优先用插件提供的副模（比如「记忆副模」插件接的硅基流动）。
+
+    约定很简单：哪个插件定义了 `aux_chat(messages, timeout, max_tokens, tag, temperature)`，
+    就把它当成副模提供者；先用的那个说了算，失败了自动往下退。
+    """
+    try:
+        if not _PLUGINS_OK or _plugins is None:
+            return None
+        provs = _plugins.aux_providers()
+        return provs[0] if provs else None
+    except Exception:
+        pass
+    return None
+
+
+def aux_chat(messages: list[dict], timeout: int = 20, max_tokens: int = 200,
+             tag: str = "aux", temperature: float = 0.2) -> str:
+    """副模通道：插件 → 配置里的副模 → 主模型，一路退。"""
+    # ① 插件（硅基流动等）优先
+    fn = _aux_plugin_provider()
+    if fn is not None:
+        try:
+            out = fn(messages, timeout=timeout, max_tokens=max_tokens,
+                     tag=tag, temperature=temperature)
+            if out:
+                return str(out)
+        except Exception as e:
+            print(f"[fish_bot] 插件副模不可用（{type(e).__name__}: {e}），继续退")
+    # ② 配置里直连的副模
+    if not (aux_ready() and _aux_budget_ok()):
+        return llm_chat(messages, timeout=timeout, max_tokens=max_tokens,
+                        tag=(tag + "/main"), temperature=temperature)
+    try:
+        payload = {
+            "model": str(CFG.get("mem_llm_model")),
+            "messages": messages,
+            "temperature": float(temperature),
+            "max_tokens": int(max_tokens),
+        }
+        resp = requests.post(
+            str(CFG.get("mem_llm_base")).rstrip("/") + "/chat/completions",
+            headers={"Authorization": f"Bearer {CFG.get('mem_llm_key') or 'none'}",
+                     "Content-Type": "application/json"},
+            json=payload, timeout=timeout)
+        if resp.status_code >= 400:
+            print(f"[fish_bot] 副模 HTTP {resp.status_code}，退回主模型")
+            raise RuntimeError(f"HTTP {resp.status_code}")
+        data = resp.json()
+        out = ((data.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+        out = str(out).strip()
+        if not out:
+            raise RuntimeError("空回复")
+        try:
+            record_usage(data.get("usage") or {}, "aux")
+        except Exception:
+            pass
+        return out
+    except Exception as e:
+        _AUX["fail"] = int(_AUX.get("fail", 0)) + 1
+        print(f"[fish_bot] 副模不可用（{type(e).__name__}: {e}），退回主模型")
+        return llm_chat(messages, timeout=timeout, max_tokens=max_tokens,
+                        tag=(tag + "/main"), temperature=temperature)
+
+
 def llm_chat(messages: list[dict], timeout: int = 90, max_tokens: int = 600, tag: str = "",
              temperature: float = 0.85) -> str:
     """LLM_ROBUST_1103：上游 503/超时/空 body 都不许把 {"error":...} 或 None 往聊天里甩。"""
@@ -588,7 +682,7 @@ def _gate_ask_llm(group_id: str, body: str, quote: str = "") -> tuple[str, float
     user = "最近的聊天：\n" + (recent or "（没有更早的记录）") + "\n\n这条消息：" + str(body or "")[:200]
     if quote:
         user += "\n（它引用了：%s）" % str(quote)[:120]
-    raw = llm_chat([{"role": "system", "content": sys_p},
+    raw = aux_chat([{"role": "system", "content": sys_p},
                     {"role": "user", "content": user}],
                    timeout=20, max_tokens=60, tag="gate", temperature=0.0)
     txt = str(raw or "").strip()

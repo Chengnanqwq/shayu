@@ -133,5 +133,16 @@
  "purge_dir": "",
  "purge_node": "",
  "purge_dsh_base": "",
- "memory_consolidate_hours": 6
+ "memory_consolidate_hours": 6,
+ "mem_llm_enabled": false,
+ "mem_llm_base": "",
+ "mem_llm_key": "",
+ "mem_llm_model": "",
+ "mem_llm_budget_per_hour": 60,
+ "aux_enabled": false,
+ "aux_base": "https://api.siliconflow.cn/v1",
+ "aux_key": "",
+ "aux_model": "",
+ "aux_models": "",
+ "aux_budget_per_hour": 60
 }
