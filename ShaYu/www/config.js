@@ -124,6 +124,7 @@ const META = {
   "avatar.last_change": ["misc", "上次换头像时间", "时间戳，只读参考，改了会被覆盖"],
   "avatar.current": ["misc", "当前头像", "现在用的是哪张图，改下次换头像才生效"],
 
+  update_mirror: ["misc", "更新镜像", "GitHub 直连不通时的镜像前缀，默认 gh-proxy.com"],
   update_url: ["misc", "新版本下载页", "面板横幅「去下载」点开的地址；空着就不显示那个按钮"],
   store_repo: ["misc", "插件商店仓库", "GitHub 的 user/repo（比如 你的名/shayu-plugins）；也可以填 index.json 的直链。空着就不显示「商店」"],
   store_branch: ["misc", "商店分支", "一般 main"],

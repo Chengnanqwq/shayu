@@ -30,6 +30,7 @@ META = {
     "self_name": ("conn", "对外昵称", "她在群里显示的名字"),
     "panel_port": ("conn", "面板端口", "管理面板监听的端口，重装后才生效"),
     "ws_port": ("conn", "协议端监听端口", "机器人等协议端连进来的端口，跟协议端那边填的要一致"),
+    "update_mirror": ("conn", "更新镜像", "GitHub 直连不通时用的镜像前缀，默认 ghproxy.net"),
     "update_url": ("conn", "更新检查地址", "查新版本用的地址，留空就不查"),
     "market_repo": ("conn", "插件市场索引", "user/repo、http(s) 直链或本地 index.json 文件名"),
     "market_branch": ("conn", "插件市场分支", "索引在哪个分支上，一般 main"),

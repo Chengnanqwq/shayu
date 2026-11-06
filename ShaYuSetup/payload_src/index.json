@@ -1,9 +1,9 @@
 {
   "app": {
-    "version": "0.014",
+    "version": "0.015",
     "released": "2026-11-06",
-    "notes": "新增插件「记忆副模」：把「这句说给谁 / 值不值得记」交给硅基流动等便宜模型（OpenAI 兼容，支持多模型按顺序试），失败自动退回主模型；命令 /副模、/副模测试、/副模模型。默认关闭，填 aux_key 即用。含 0.013 的副模通道与更早全部改动。",
-    "url": "https://github.com/Chengnanqwq/shayu/releases/tag/v0.009"
+    "notes": "修「检查更新」：以前读的是安装目录里那份 index.json，版本号永远等于当前版本，所以永远显示「已是最新」。现在先查 GitHub Releases（latest 跳转，不占 API 配额），查不到再退回插件市场索引的 app 块；顺手修掉 index.json 里长期指向 v0.009 的下载地址。",
+    "url": "https://github.com/Chengnanqwq/shayu/releases/tag/v0.015"
   },
   "version": 1,
   "updated": "2026-11-06",

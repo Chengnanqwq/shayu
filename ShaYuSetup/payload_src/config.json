@@ -103,9 +103,9 @@
  "convo_cooldown_seconds": 3,
  "convo_no_mention_turns": 2,
  "convo_miss_min_gap_seconds": 30,
- "market_repo": "index.json",
+ "market_repo": "Chengnanqwq/shayu-plugins",
  "market_branch": "main",
- "market_mirror": "",
+ "market_mirror": "https://gh-proxy.com",
  "store_repo": "Chengnanqwq/shayu-plugins",
  "store_branch": "main",
  "store_path": "plugins/",
@@ -144,5 +144,7 @@
  "aux_key": "",
  "aux_model": "",
  "aux_models": "",
- "aux_budget_per_hour": 60
+ "aux_budget_per_hour": 60,
+ "update_repo": "Chengnanqwq/shayu",
+ "update_mirror": "https://gh-proxy.com"
 }

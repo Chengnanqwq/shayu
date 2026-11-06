@@ -7466,6 +7466,69 @@ def start_panel():
             if not self._guard():
                 return
             try:
+                if self.path.startswith("/api/update"):
+                    # UPDATE_1106：面板的「检查更新」以前读本地 index.json（market_repo 默认就是
+                    # 安装目录里的那个文件），版本号永远等于当前版本，所以永远显示「已是最新」。
+                    # 现在改成：
+                    #   ① GitHub Releases 的 latest 跳转（不占用 API 配额）
+                    #   ② 拿不到就退回插件市场索引里的 app 块
+                    #   ③ 都拿不到就老实说失败，前端会退回本地版本号
+                    try:
+                        import urllib.request as _ur
+                        import re as _re
+                        _repo = str(CFG.get("update_repo") or "Chengnanqwq/shayu").strip().strip("/")
+                        info = {"ok": False, "version": "", "url": "", "notes": "", "source": ""}
+                        try:
+                            req = _ur.Request(f"https://github.com/{_repo}/releases/latest",
+                                              headers={"User-Agent": "shayu-bot"})
+                            with _ur.urlopen(req, timeout=10) as r:
+                                final = r.geturl() or ""
+                            m = _re.search(r"/releases/tag/v?([\w.\-+]+)", final)
+                            if m:
+                                info.update(ok=True, version=m.group(1), url=final,
+                                            source="github")
+                        except Exception as _e1:
+                            print(f"[fish_bot] 更新检查（github）失败: {_e1}")
+                        if not info["ok"]:
+                            # 国内机器直连 raw.githubusercontent 基本不通；镜像按顺序试。
+                            # 注意 ghproxy.net 会缓存旧文件（app 块是空的），所以放在后面，
+                            # 并且**必须真的读到 app.version 才算成功**。
+                            _mk = str(CFG.get("market_repo") or "").strip()
+                            _br = str(CFG.get("market_branch") or "main")
+                            _raw = f"https://raw.githubusercontent.com/{_mk}/{_br}/index.json"
+                            _srcs = []
+                            _um = str(CFG.get("update_mirror") or "").strip()
+                            if _um:
+                                _srcs.append(_um.rstrip("/") + "/" + _raw)
+                            if "/" in _mk and not _mk.endswith(".json"):
+                                _srcs += [
+                                    f"https://gh-proxy.com/{_raw}",
+                                    f"https://cdn.jsdelivr.net/gh/{_mk}@{_br}/index.json",
+                                    f"https://fastly.jsdelivr.net/gh/{_mk}@{_br}/index.json",
+                                    _raw,
+                                ]
+                            for _src in _srcs:
+                                try:
+                                    req2 = _ur.Request(_src, headers={"User-Agent": "shayu-bot"})
+                                    with _ur.urlopen(req2, timeout=12) as r2:
+                                        _d = json.loads(r2.read().decode("utf-8-sig"))
+                                    _app = _d.get("app") or {}
+                                    if _app.get("version"):
+                                        info.update(ok=True, version=str(_app["version"]),
+                                                    url=str(_app.get("url") or ""),
+                                                    notes=str(_app.get("notes") or ""),
+                                                    source=_src.split("/")[2])
+                                        break
+                                except Exception as _e2:
+                                    print(f"[fish_bot] 更新检查来源失败（{_src[:60]}）: {_e2}")
+                        _ov = str(CFG.get("update_url") or "").strip()
+                        if _ov and info.get("ok"):
+                            info["url"] = _ov
+                        self._send(200, json.dumps(info, ensure_ascii=False), "application/json")
+                    except Exception as e:
+                        self._send(200, json.dumps({"ok": False, "error": f"{type(e).__name__}: {e}"},
+                                                   ensure_ascii=False), "application/json")
+                    return
                 if self.path.startswith("/api/market"):
                     # MARKET_1105：拉远端插件索引。默认 GitHub raw，可用 CFG["market_repo"] 覆盖
                     try:
