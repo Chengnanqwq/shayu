@@ -132,5 +132,6 @@
  "gate_cache_seconds": 90,
  "purge_dir": "",
  "purge_node": "",
- "purge_dsh_base": ""
+ "purge_dsh_base": "",
+ "memory_consolidate_hours": 6
 }

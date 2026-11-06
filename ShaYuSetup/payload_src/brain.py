@@ -43,9 +43,25 @@ MAX_TEXT = 160
 DEDUP_SIM = 0.92          # 同一类里相似到这个程度就当同一条
 CROSS_DEDUP_SIM = 0.96    # 跨会话要求更高：几乎完全相同才合并，防止不同语境被误并
 CONSOLIDATE_EVERY = 40    # 每新增这么多条跑一次巩固
+CONSOLIDATE_GAP = 6 * 3600  # TIME_1106：距上次巩固超过 6 小时也跑一次（没人聊天时也要按时间遗忘）
 WORK_TTL = 3 * 86400      # 工作记忆最多活 3 天
-DECAY_HALF_LIFE_DAYS = 200  # 长期记忆：200 天不用，重要度减半；两个半衰期后才会清
 MAX_WORK = 80
+
+# ---- 遗忘曲线（CURVE_1106）--------------------------------------------------
+# 以前重要度衰减写死「200 天减半」，跟每条记忆自己的稳定期(stab)无关：
+# 一条随口说的「今天好累」和「老爹失业了」衰减速度一样，聊得越多的记忆反而
+# 越容易被一起冲淡。现在改成**跟着各自的稳定期走**：
+#   稳定期 STAB(天)  = 1.5 + 6×重要度   （核心记忆抬到 400）
+#   寿命     LIFE(天) = clamp(STAB × 12, 21, 900)
+#   重要度衰减        = exp(-闲置天数 / LIFE)
+#   删               = 重要度<0.08 且 闲置>2×LIFE 且 从没被检索回来过
+# 也就是说：被反复提起的记忆，稳定期变长 → 寿命变长 → 衰减更慢，越用越牢；
+# 一句话的交情，寿命只有 21 天，很快就自己走。
+DECAY_HALF_LIFE_DAYS = 200   # 老参数，保留给旧数据/文档对照；新逻辑不再用它算衰减
+LIFE_FACTOR = 18.0           # 寿命 = 稳定期 × 18
+LIFE_MIN = 30.0              # 最短寿命（天）：闲聊也别当天就忘
+LIFE_MAX = 1200.0            # 最长寿命（天）：再重要也有上限
+DECAY_IMP_FLOOR = 0.06       # 重要度低到这个线以下，才可能被清
 
 KINDS = {
     "meme":      {"label": "梗", "color": "#2ee6c8", "imp": 0.42},
@@ -444,6 +460,34 @@ class Brain:
         except Exception:
             return 1.0
         return math.exp(-max(0.0, now - la) / 86400.0 / stab)
+
+    def life_of(self, node: dict) -> float:
+        """记忆的「寿命」（天）：重要度衰减用到的时间尺度。
+
+        CURVE_1106：寿命跟着稳定期走，稳定期越长的记忆衰减越慢。
+        核心记忆（人物/约定/显式写入）本来就靠保护规则跳过衰减，这里给到上限即可。
+        """
+        try:
+            stab = max(0.3, self.stab_of(node))
+        except Exception:
+            stab = 1.5
+        return _clip(stab * LIFE_FACTOR, LIFE_MIN, LIFE_MAX)
+
+    def maybe_consolidate(self, gap: float | None = None, force: bool = False) -> dict | None:
+        """TIME_1106：到点就巩固一次，返回 stats；没到点返回 None。
+
+        巩固以前只在「新增满 40 条」时触发 —— 没人跟她聊，就永远不会衰减、
+        不会合并、不会清理，记忆会一直停在最后一次活跃那天的样子。
+        现在加上时间维度：距上次巩固超过 gap 秒（默认 6 小时）就整理一次。
+        """
+        if force:
+            return self.consolidate()
+        now = _now()
+        wait = CONSOLIDATE_GAP if gap is None else float(gap)
+        last = float(self.meta.get("last_consolidate") or 0.0)
+        if last and now - last < wait:
+            return None
+        return self.consolidate()
 
     def _reinforce(self, node: dict) -> None:
         """被想起来一次就复习一次：越接近遗忘，复习越有效（间隔效应）。"""
@@ -1088,7 +1132,8 @@ class Brain:
                 if merged_away:
                     continue
 
-            # 3) 不用的记忆慢慢变淡：200 天半衰（用过的会重置衰减钟）
+            # 3) 不用的记忆慢慢变淡：按各自的寿命衰减（CURVE_1106）
+            #    以前是所有人统一 200 天减半；现在重要/常被提起的记忆寿命更长，衰减更慢。
             for n in list(self.nodes.values()):
                 if n["src"] == "explicit" or n["k"] == "agreement":
                     continue
@@ -1097,12 +1142,13 @@ class Brain:
                 base = max(float(n.get("d") or 0.0), float(n["la"]))
                 idle_days = max(0.0, now - base) / 86400
                 if idle_days >= 0.5:
-                    factor = 0.5 ** (idle_days / DECAY_HALF_LIFE_DAYS)
+                    life = self.life_of(n)
+                    factor = math.exp(-idle_days / life)
                     n["imp"] = _clip(n["imp"] * factor, 0.05, 1.0)
                     n["d"] = now
                     stats["decayed"] += 1
 
-            # 4) 两个半衰期（400 天）还没人想起、又已经很弱的，清掉
+            # 4) 衰减到底、又从来没被想起来的，清掉（阈值跟着寿命走，不再是固定 400 天）
             for n in list(self.nodes.values()):
                 if n["src"] == "explicit" or n["k"] == "agreement":
                     continue
@@ -1113,7 +1159,8 @@ class Brain:
                     self._unlink(n["id"]); self.nodes.pop(n["id"], None); self._bg.pop(n["id"], None)
                     stats["pruned"] += 1
                     continue
-                if n["imp"] < 0.08 and idle_days > 2 * DECAY_HALF_LIFE_DAYS and n["hits"] <= 1:
+                if (n["imp"] < DECAY_IMP_FLOOR and idle_days > 3 * self.life_of(n)
+                        and n["hits"] <= 1):
                     self._unlink(n["id"])
                     self.nodes.pop(n["id"], None)
                     self._bg.pop(n["id"], None)

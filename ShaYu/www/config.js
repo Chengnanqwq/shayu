@@ -81,6 +81,7 @@ const META = {
 
   memory_per_session: ["memory", "每会话记几条", "每个群/私聊保留多少条上下文"],
   memory_warn_enable: ["memory", "记忆告警", "记忆量太大时在日志里提醒"],
+  memory_consolidate_hours: ["memory", "巩固间隔", "多久按时间整理一次记忆（合并/衰减/清理），单位小时"],
 
   admins: ["perm", "管理员", "这批号能用管理指令，但还不是主人"],
   non_admin_daily_limit: ["perm", "群友每日条数", "普通群友每天最多触发她多少次，0 表示不限"],

@@ -6954,6 +6954,31 @@ def make_state_backup() -> dict:
             "kept": len(list(BACKUP_DIR.glob("fishbot-*.zip")))}
 
 
+async def memory_loop():
+    """TIME_1106：按时间巩固记忆（合并重复 / 衰减 / 清理）。
+
+    以前只在「新增满 40 条」时巩固，没人聊就永远不衰减 —— 她放一天假，
+    记忆还是昨天那个样子。现在每半小时看一眼，到点就整理一次。
+    间隔用配置 memory_consolidate_hours（默认 6 小时），设为 0 就是每次检查都整理。
+    """
+    await asyncio.sleep(20)
+    while True:
+        try:
+            if BRAIN is not None:
+                try:
+                    hours = float(CFG.get("memory_consolidate_hours", 6) or 0)
+                except Exception:
+                    hours = 6.0
+                gap = max(0.0, hours) * 3600
+                st = await asyncio.to_thread(BRAIN.maybe_consolidate, gap)
+                if st:
+                    print(f"[fish_bot] 记忆巩固：合并 {st.get('merged', 0)} / 删除 {st.get('pruned', 0)} "
+                          f"/ 衰减 {st.get('decayed', 0)} / 节点 {st.get('nodes', len(BRAIN.nodes))}")
+        except Exception as e:
+            print(f"[fish_bot] 记忆巩固失败: {e}")
+        await asyncio.sleep(1800)
+
+
 async def backup_loop():
     """每天备一次（超过 20 小时就补一次）。"""
     await asyncio.sleep(90)
@@ -8687,6 +8712,7 @@ async def main():
           f"核心 {'在线' if CORE is not None else '离线'}，监听 {WS_PORT}（OneBot 反向 WS 服务器）...")
     asyncio.create_task(autonomous_loop())
     asyncio.create_task(backup_loop())
+    asyncio.create_task(memory_loop())
     asyncio.create_task(growth_loop())
     asyncio.create_task(look_loop())
     asyncio.create_task(sleep_schedule_loop())
