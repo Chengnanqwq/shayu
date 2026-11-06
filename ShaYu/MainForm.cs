@@ -152,9 +152,11 @@ public class MainForm : Form
     {
         if (_ready) return;
         var dataDir = Path.Combine(Path.GetTempPath(), "shayu_webview2");
-        var opts = new CoreWebView2EnvironmentOptions(
-            "--disable-web-security --disable-features=IsolateOrigins,site-per-process");
-        var env = await CoreWebView2Environment.CreateAsync(null, dataDir, opts);
+        // SOP_1106：以前这里带 --disable-web-security --disable-features=IsolateOrigins,site-per-process，
+        // 等于把整个内嵌浏览器的同源策略关掉。插件 UI（ui_js）和插件名都是注入这个页面的，
+        // 关掉 SOP 之后任何插件都能读任意本地接口、顺带触发 Dispatch 里的系统动作。
+        // 现在用默认（安全）环境；面板跨域调 127.0.0.1:6200 靠 bot.py 里那套 CORS 白名单放行。
+        var env = await CoreWebView2Environment.CreateAsync(null, dataDir);
         await _web.EnsureCoreWebView2Async(env);
 
         var core = _web.CoreWebView2;
@@ -493,7 +495,13 @@ public class MainForm : Form
             if (!r.IsSuccessStatusCode) return (false, "");
             var body = await r.Content.ReadAsStringAsync();
             using var doc = JsonDocument.Parse(body);
-            var m = doc.RootElement.TryGetProperty("llm_model", out var lm) ? lm.GetString() ?? "" : "";
+            // STATUS_KEY_1106：/api/status 回的是 model，不是 llm_model ——
+            // 以前这里取 llm_model，顶栏的模型名一直是空的。
+            var m = "";
+            if (doc.RootElement.TryGetProperty("model", out var m1))
+                m = m1.GetString() ?? "";
+            else if (doc.RootElement.TryGetProperty("llm_model", out var m2))
+                m = m2.GetString() ?? "";
             return (true, m);
         }
         catch { return (false, ""); }
@@ -531,7 +539,52 @@ public class MainForm : Form
     });
 
     private void StopSing() => RunAsync("停止翻唱", () =>
-        Sh($"for /f \"tokens=5\" %a in ('netstat -ano ^| findstr :{_set.SingPort} ^| findstr LISTENING') do taskkill /PID %a /F", 15000));
+    {
+        // KILLSCOPE_1106：以前是 `netstat -ano | findstr :7100` → taskkill，
+        // 谁占了 7100 就杀谁（7100 被别的程序占用时直接误杀）。
+        // 改成按命令行认：只杀跑 sing_server.py 的 python。
+        var target = Path.GetFileName(string.IsNullOrWhiteSpace(_set.SingServerPy) ? "" : _set.SingServerPy);
+        if (string.IsNullOrWhiteSpace(target)) target = "sing_server.py";
+        var killed = 0;
+        foreach (var name in new[] { "python", "pythonw" })
+        {
+            foreach (var p in Process.GetProcessesByName(name))
+            {
+                try
+                {
+                    var cl = CommandLineOf(p.Id);
+                    if (string.IsNullOrEmpty(cl)) continue;
+                    if (cl.IndexOf(target, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    p.Kill(true);
+                    killed++;
+                }
+                catch { }
+            }
+        }
+        if (killed == 0) throw new Exception("没找到翻唱服务进程（可能本来就停着）");
+    });
+
+    /// <summary>读命令行（WMI/CIM），拿不到返回空串。用来精确认进程，别按名字/端口乱杀。</summary>
+    private static string CommandLineOf(int pid)
+    {
+        try
+        {
+            using var p = Process.Start(new ProcessStartInfo("wmic",
+                $"process where processid={pid} get CommandLine /value")
+            { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true });
+            if (p is null) return "";
+            var text = p.StandardOutput.ReadToEnd();
+            p.WaitForExit(3000);
+            foreach (var line in text.Split('\n'))
+            {
+                var t = line.Trim();
+                if (t.StartsWith("CommandLine=", StringComparison.OrdinalIgnoreCase))
+                    return t.Substring("CommandLine=".Length).Trim();
+            }
+        }
+        catch { }
+        return "";
+    }
 
     private void RestartSnow() => RunAsync("重启 SnowLuma", () =>
     {
@@ -568,7 +621,13 @@ public class MainForm : Form
     private void WakeBot() => RunAsync("叫醒傻鱼", () =>
     {
         if (string.IsNullOrWhiteSpace(_set.PanelUrl)) throw new Exception("没配置面板地址");
-        try { Http.GetAsync(_set.PanelUrl.TrimEnd('/') + "/api/wake").Wait(6000); } catch { }
+        // WAKE_1106：/api/wake 只认 POST，以前用 GET 打过去永远叫不醒，还会被当成错路由。
+        try
+        {
+            using var body = new StringContent("{}", Encoding.UTF8, "application/json");
+            using var r = Http.PostAsync(_set.PanelUrl.TrimEnd('/') + "/api/wake", body).Result;
+        }
+        catch { }
     });
 
     private void StartTunnel() => RunAsync("启动隧道", () =>

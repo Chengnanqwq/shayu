@@ -295,6 +295,13 @@ DEFAULTS = {
     },
     "proactive_probability": 0.08,          # 没被叫时接话的概率（群友，以及主人对大家说话时）
     "proactive_cooldown_seconds": 120,      # 同一个群主动接话的最小间隔
+    # ---- 接话闸门（REPLY_GATE_1106）：别人在跟别人说话时别插嘴 ----
+    "reply_gate": "balanced",   # off=只走本地规则 / loose=灰色放行 / balanced=听模型 / strict=没把握就闭嘴
+    "gate_llm": True,           # 灰色地带要不要让模型判一次（关掉就纯规则）
+    "gate_llm_timeout": 3.5,    # 判定超时（秒），超时就当「大家」
+    "gate_conf_min": 0.55,      # strict 档下低于这个把握度就当「大家」
+    "gate_budget_per_min": 8,   # 每群每分钟最多判几次，防止烧 token
+    "gate_cache_seconds": 90,   # 同一句话的判定缓存多久
 }
 
 # ============ 配置加载 ============
@@ -495,6 +502,154 @@ def _refers_to_me(raw: str) -> bool:
     if "你" in raw and "你们" not in raw:
         return True
     return False
+
+
+# ============ 接话闸门（REPLY_GATE_1106） ============
+# 要解决的问题：别人正在跟别人说话，她「啪」一下就插进去答，答的还是别人的事。
+# 做法（从便宜到贵，够用就停）：
+#   ① 本地硬规则：@她 / 叫她名字 / 引用她 → 她；@别人 / 引用别人 → 别人
+#   ② 灰色地带才问模型：把最近几句一起给它，让它只说「她 / 大家 / 别人」+ 把握度
+#      带 3.5 秒超时、每群每分钟预算、同一句缓存；失败一律按「大家」，不再默认「她」
+#   ③ 三种档位：off 只走规则 / loose 灰色放行 / balanced 听模型 / strict 没把握就闭嘴
+GATE_STATS = {"her": 0, "crowd": 0, "other": 0, "local": 0, "llm": 0,
+              "fallback": 0, "budget_skip": 0, "blocked": 0}
+_GATE_CACHE: dict = {}          # (gid, body, quote) -> (ts, verdict, why, conf)
+_GATE_BUDGET: dict = {}         # gid -> [window_start, used]
+GATE_NAMES = ("傻鱼", "鱼鱼", "小鱼", "肥鱼", "鱼宝", "小鲸鱼", "D指导", "傻傻的鱼")
+
+
+def _gate_at_list(raw: str) -> list[str]:
+    try:
+        return re.findall(r"\[CQ:at,qq=([0-9]+)\]", raw or "")
+    except Exception:
+        return []
+
+
+def gate_local(raw: str, body: str, quote: str = "") -> tuple[str | None, str, float]:
+    """本地硬规则。返回 (verdict|None, why, conf)；None = 灰色，交给下一级。"""
+    self_qq = str(CFG.get("self_qq") or "")
+    ats = _gate_at_list(raw)
+    at_me = bool(self_qq) and self_qq in ats
+    at_others = [q for q in ats if q != self_qq]
+    text = str(body or raw or "")
+    named = any(k in text for k in GATE_NAMES)
+    if at_me:
+        return "她", "@我", 1.0
+    if named:
+        return "她", "叫名字", 0.97
+    # 引用：引用的是她自己说的话 → 在接她的话；引用的是别人的 → 在跟别人说话
+    if quote:
+        q_named = any(k in str(quote) for k in GATE_NAMES)
+        if q_named:
+            return "她", "引用我的消息", 0.9
+        if at_others:
+            return "别人", "引用别人的消息且 @ 了别人", 0.92
+        return "别人", "引用别人的消息", 0.85
+    if at_others:
+        return "别人", "@了别人", 0.95
+    return None, "", 0.0
+
+
+def _gate_budget_ok(gid: str) -> bool:
+    """每群每分钟最多问几次模型，防止刷屏把 token 烧光。"""
+    try:
+        cap = int(CFG.get("gate_budget_per_min", 8) or 0)
+    except Exception:
+        cap = 8
+    if cap <= 0:
+        return True
+    now = time.time()
+    slot = _GATE_BUDGET.get(gid)
+    if not slot or now - float(slot[0]) >= 60:
+        _GATE_BUDGET[gid] = [now, 1]
+        return True
+    if int(slot[1]) >= cap:
+        GATE_STATS["budget_skip"] += 1
+        return False
+    slot[1] = int(slot[1]) + 1
+    return True
+
+
+def _gate_ask_llm(group_id: str, body: str, quote: str = "") -> tuple[str, float, str]:
+    """让模型看最近几句，判断这句话是在跟谁说话。同步函数，调用方放进线程。"""
+    try:
+        recent = recent_chat_lines(str(group_id), 12)
+    except Exception:
+        recent = ""
+    sys_p = (
+        "你是 QQ 群聊的「说话对象」判别器。只判断最后一条消息是在跟谁说话。\n"
+        "可选答案只有三个词：\n"
+        "她 = 在跟群里的机器人（傻鱼/小鲸鱼/D指导）说话：叫她、问她、让她做事、接着她的话说、聊她；\n"
+        "大家 = 泛泛而谈、感慨、通知、没有明确对象；\n"
+        "别人 = 明确在跟某个群友说话：@了某人、叫了别人的名字、回复别人的消息、"
+        "接着别人刚说的具体话题、两个人之间的一问一答。\n"
+        "拿不准就选 大家。只输出 JSON：{\"who\":\"她|大家|别人\",\"conf\":0.0~1.0}"
+    )
+    user = "最近的聊天：\n" + (recent or "（没有更早的记录）") + "\n\n这条消息：" + str(body or "")[:200]
+    if quote:
+        user += "\n（它引用了：%s）" % str(quote)[:120]
+    raw = llm_chat([{"role": "system", "content": sys_p},
+                    {"role": "user", "content": user}],
+                   timeout=20, max_tokens=60, tag="gate", temperature=0.0)
+    txt = str(raw or "").strip()
+    m = re.search(r"\{[^{}]*\}", txt)
+    who, conf = "大家", 0.5
+    if m:
+        try:
+            d = json.loads(m.group(0))
+            w = str(d.get("who") or "").strip()
+            if w in ("她", "大家", "别人"):
+                who = w
+            conf = float(d.get("conf") or 0.5)
+        except Exception:
+            pass
+    else:
+        for w in ("别人", "大家", "她"):
+            if w in txt:
+                who = w
+                break
+    return who, max(0.0, min(1.0, conf)), txt[:40]
+
+
+async def reply_gate(evt: dict, raw: str, body: str, quote: str = "",
+                     is_master: bool = False) -> tuple[str, str]:
+    """返回 (verdict, why)，verdict ∈ {她, 大家, 别人}。"""
+    mode = str(CFG.get("reply_gate") or "balanced").strip().lower()
+    gid = str(evt.get("group_id") or "")
+    verdict, why, conf = gate_local(raw, body, quote)
+    if verdict:
+        GATE_STATS["local"] += 1
+        GATE_STATS["her" if verdict == "她" else "other"] += 1
+        return verdict, why
+    if mode == "off" or not bool(CFG.get("gate_llm", True)):
+        # 关掉时保持旧行为：灰色一律当「大家」，由后面的概率决定接不接
+        return "大家", "规则没结论(off)"
+    key = (gid, str(body or "")[:120], str(quote or "")[:80])
+    hit = _GATE_CACHE.get(key)
+    now = time.time()
+    ttl = float(CFG.get("gate_cache_seconds", 90) or 90)
+    if hit and now - float(hit[0]) < ttl:
+        return hit[1], hit[2] + "(缓存)"
+    if not _gate_budget_ok(gid):
+        return "大家", "预算用完→按大家"
+    try:
+        who, cf, snippet = await asyncio.wait_for(
+            asyncio.to_thread(_gate_ask_llm, gid, body, quote),
+            timeout=float(CFG.get("gate_llm_timeout", 3.5) or 3.5))
+        GATE_STATS["llm"] += 1
+        conf_min = float(CFG.get("gate_conf_min", 0.55) or 0.55)
+        if cf < conf_min and mode == "strict":
+            who, snippet = "大家", "把握不足(" + snippet + ")"
+        why = f"模型:{snippet}(conf={cf:.2f})"
+    except Exception as e:
+        GATE_STATS["fallback"] += 1
+        who, why = "大家", f"判定失败({type(e).__name__})→按大家"
+    _GATE_CACHE[key] = (now, who, why, conf)
+    if len(_GATE_CACHE) > 2000:
+        for k in list(_GATE_CACHE)[:500]:
+            _GATE_CACHE.pop(k, None)
+    GATE_STATS["her" if who == "她" else ("crowd" if who == "大家" else "other")] += 1
+    return who, why
 
 
 def feature_on(name: str, default: bool = True) -> bool:
@@ -2230,14 +2385,15 @@ def split_by_chars(line: str, limit: int) -> list[str]:
     return [x for x in merged if x]
 
 
-# ===== 18+ 硬边界：只有跟主人说话才放开，别人一律拦掉（提示词之外的第二道闸） =====
+# ===== 尺度硬边界：只有跟主人私聊才放开，别人一律拦掉（提示词之外的第二道闸） =====
 # 只放「基本不会被正常聊天误用」的词；上床/高潮/舔/脱衣这类正常话也会用到，交给提示词管
-NSFW_TERMS = ("做爱", "性交", "口交", "裸体", "裸照", "自慰", "射精", "阴茎", "阴道",
-              "乳头", "骚穴", "黄图", "搞黄色", "涩图", "18禁")
+NSFW_TERMS = ("\u505a\u7231", "\u6027\u4ea4", "\u53e3\u4ea4", "\u88f8\u4f53", "\u88f8\u7167",
+              "\u81ea\u6170", "\u5c04\u7cbe", "\u9634\u830e", "\u9634\u9053", "\u4e73\u5934",
+              "\u9a9a\u7a74", "\u9ec4\u56fe", "\u641e\u9ec4\u8272", "\u6da9\u56fe", "\u0031\u0038\u7981")
 
 
 def nsfw_hit(text: str) -> str:
-    """返回命中的 18+ 词；没命中返回空串。"""
+    """返回命中的越线词；没命中返回空串。"""
     t = str(text or "")
     for w in NSFW_TERMS:
         if w in t:
@@ -2259,13 +2415,17 @@ async def reply(ws, evt: dict, text: str, quote_id: str | None = None):
     if _leak:
         print(f"[fish_bot] 拦下泄密内容（命中 {_leak[:4]}…），整条替换")
         text = random.choice(["这个不能在这儿说。", "想套我话？", "不给。"])
-    # 非主人会话：18+ 直接拦（人设之外再加一道硬的）
+    # OPEN_1106：尺度只在「主人私聊」放开。
+    # 以前按发送者判断（uid == master 就放行），主人在群里说一句也会放行 ——
+    # 群是公开场合，不该走这条。现在收紧成 private + master。
     try:
         _uid_now = str(((evt or {}).get("user_id") if isinstance(evt, dict) else "") or "")
-        if _uid_now and _uid_now != str(CFG.get("master_qq")):
+        _is_private = str((evt or {}).get("message_type") or "") == "private"
+        _private_master = bool(_is_private and _uid_now and _uid_now == str(CFG.get("master_qq")))
+        if not _private_master:
             _hit = nsfw_hit(text)
             if _hit:
-                print(f"[fish_bot] 非主人会话拦下 18+（命中「{_hit}」）")
+                print(f"[fish_bot] 非主人私聊/群聊拦下越线内容（命中「{_hit}」）")
                 text = random.choice(["？你不对劲", "这个不聊", "少来这套", "…打住"])
 
     except Exception:
@@ -4296,7 +4456,7 @@ async def handle_message(ws, evt: dict):
                 print(f"[fish_bot] @ 的是 {at_other}，不是自己，跳过")
                 return
             # 名字叫她也算在叫她（不用非 @ 不可）
-            _called_by_name = any(k in raw for k in ("傻鱼", "鱼鱼", "小鱼", "肥鱼", "鱼宝"))
+            _called_by_name = any(k in raw for k in GATE_NAMES)
             if at_me or _called_by_name:
                 _bw = BUBBLE_WAIT.get(str(evt.get("group_id")))
                 if _bw:
@@ -4310,12 +4470,27 @@ async def handle_message(ws, evt: dict):
                 _sess = f"{msg_type}:{evt.get('group_id')}"
                 gid = str(evt.get("group_id"))
                 now = time.time()
+                # REPLY_GATE_1106：先问「这句到底是不是跟我说」，再谈接不接。
+                # 以前这一步不问，结果别人在跟别人聊，她也照接。
+                # 注意：这个位置还没有 _body/_quote（那是后面回复阶段才算的），
+                # 所以这里自己清一遍 CQ 码，不借用后面的局部变量。
+                _gbody = clean_cq(raw)
+                _gv, _gwhy = await reply_gate(evt, raw, _gbody, "", is_master=False)
+                _gmode = str(CFG.get("reply_gate") or "balanced").strip().lower()
+                if _gv == "别人":
+                    GATE_STATS["blocked"] += 1
+                    print(f"[gate] 别人在说话，不接（{_gwhy}）：{_gbody[:30]}")
+                    return
+                if _gv == "大家" and _gmode == "strict":
+                    GATE_STATS["blocked"] += 1
+                    print(f"[gate] strict：没说给我听，不接（{_gwhy}）")
+                    return
                 # CONVO_1105：正在跟她聊的人说话，就一直接，不再掷骰子
                 _cv = CONVO.get(_sess)
                 _in_convo = bool(_cv and _cv.get("partner") == user
                                  and now - float(_cv.get("ts", 0)) < float(CFG.get("convo_window_seconds", 300)))
                 if _in_convo:
-                    if _refers_to_me(raw):
+                    if _gv == "她":
                         _cv["miss"] = 0
                         _cv["ts"] = now
                         if now - PROACTIVE_LAST.get(gid, 0) < float(CFG.get("convo_cooldown_seconds", 3)):
@@ -4323,7 +4498,8 @@ async def handle_message(ws, evt: dict):
                         PROACTIVE_LAST[gid] = now
                         print(f"[fish_bot] 会话续接：{user}（第 {_cv.get('turns', 1)} 轮）")
                     else:
-                        # 快节奏的一来一回不算「没提我」；隔了 30 秒以上还没提才算
+                        # CONVO_GATE_1106：会话开着也不再无脑接。
+                        # 以前这里只数 miss、然后照样往下走去回复，等于替别人答话。
                         _gap = now - float(_cv.get("ts", 0))
                         if _gap >= float(CFG.get("convo_miss_min_gap_seconds", 30)):
                             _cv["miss"] = int(_cv.get("miss", 0)) + 1
@@ -4332,7 +4508,9 @@ async def handle_message(ws, evt: dict):
                             CONVO.pop(_sess, None)
                             print(f"[fish_bot] 会话结束（{_cv['miss']} 次间隔后没提我）：{user}")
                             return
-                        print(f"[fish_bot] 会话还开着（miss={_cv['miss']}，间隔 {_gap:.0f}s）")
+                        GATE_STATS["blocked"] += 1
+                        print(f"[gate] 会话里这句不是说给我（{_gwhy}）：{_body[:30]}")
+                        return
                 else:
                     _score = interest_score(raw, _sess)
                     if not feature_on("proactive") or _score < float(CFG.get("proactive_threshold", 0.45)):
@@ -5776,34 +5954,27 @@ async def handle_message(ws, evt: dict):
                 print(f"[fish_bot] 解析 @ 昵称失败: {e}")
         # 主人在群里没点她时：先看她这句是在跟谁说话，再决定接不接（命令已经在上面返回了）
         if msg_type == "group" and is_master:
-            _at_list = re.findall(r"\[CQ:at,qq=([0-9]+)\]", raw)
-            _at_me_now = str(CFG["self_qq"]) in _at_list
-            _named = any(k in raw for k in ("傻鱼", "鱼鱼", "小鱼", "肥鱼", "鱼宝"))
-            if not (_at_me_now or _named):
-                # @ 的是别人，这句明显不是说给她听的
-                if [q for q in _at_list if q != str(CFG["self_qq"])]:
-                    print("[fish_bot] 主人 @ 的是别人，先不接")
+            # REPLY_GATE_1106：统一走接话闸门（本地规则 → 灰色才问模型 → 失败按「大家」）。
+            # 以前出错时默认「她」，等于只要判不出来就往上接。
+            _who_to, _gwhy = await reply_gate(evt, raw, _body or raw, _quote, is_master=True)
+            if _who_to == "别人":
+                if _quote:
+                    print(f"[fish_bot] 主人在回别人的消息，先不接（{_gwhy}）：{(_body or raw)[:30]}")
                     return
-                # 让她自己看最近几句，判断主人是在跟她说话，还是在跟群里别人说话
-                try:
-                    _who_to = await asyncio.to_thread(
-                        addressed_to_me, str(evt.get("group_id") or ""), _body or raw, _quote)
-                except Exception:
-                    _who_to = "她"
-                if _who_to == "别人":
-                    if _quote:
-                        print(f"[fish_bot] 主人在回别人的消息，先不接：{(_body or raw)[:30]}")
-                        return
-                    # 没有引用、没有 @ 别人，只是接着话题说 —— 按“跟大家说”处理
-                    _who_to = "大家"
-                if _who_to == "大家" and random.random() >= float(
-                        CFG.get("master_proactive_probability", 0.9)):
-                    print("[fish_bot] 主人在跟大家说话，这次让她潜水")
-                    return
-                _sc = interest_score(_body or raw, f"group:{evt.get('group_id')}")
-                if _sc < float(CFG.get("master_group_threshold", 0.0)):
-                    print(f"[fish_bot] 主人这句她不太想接（{_sc:.2f}）")
-                    return
+                # 没有引用、没有 @ 别人，只是接着话题说 —— 按“跟大家说”处理
+                _who_to = "大家"
+            _gmode = str(CFG.get("reply_gate") or "balanced").strip().lower()
+            if _who_to == "大家" and _gmode == "strict":
+                print(f"[gate] strict：主人这句也没点名，先不接（{_gwhy}）")
+                return
+            if _who_to == "大家" and random.random() >= float(
+                    CFG.get("master_proactive_probability", 0.9)):
+                print("[fish_bot] 主人在跟大家说话，这次让她潜水")
+                return
+            _sc = interest_score(_body or raw, f"group:{evt.get('group_id')}")
+            if _sc < float(CFG.get("master_group_threshold", 0.0)):
+                print(f"[fish_bot] 主人这句她不太想接（{_sc:.2f}）")
+                return
 
         # 图片描述并到同一条 user 消息，避免一张图占两条上下文
         _text_part = re.sub(r"\[图片\]", "", _body).strip()
@@ -5874,12 +6045,12 @@ async def handle_message(ws, evt: dict):
             "也别拿别人的告白撩回去。绝不答应、绝不叫别人老公/宝贝/亲爱的。只有主人可以这么叫你、这么撩你。"
             "\n\n【怎么接撩】主人逗你、撩你（「勾引我」「亲一个」这类）别当正经请求拒绝，"
             "嘴硬心软接一句、损回去、撩回去都行，别冷场也别讲道理。"
-            "18+ 只在**跟主人说话时**放开：这条消息只要不是主人发的（群友、陌生人、群里其他人），"
-            "一点 18+ 都不许有——不写、不暗示、不开车；被要求就损一句或者岔开，装听不懂也行。"
+            "尺度只对**主人私聊**放开：群里、别人面前一律收着——"
+            "不写、不暗示、不开车；被要求就损一句或者岔开，装听不懂也行。"
             "（系统还会再过滤一遍，写了也会被拦。）"
             "\n\n【私聊和群聊】主人私聊里发的东西、说的话，别搬到群里去吐槽；群里有人问「谁啊」，"
-            "就说「私聊的事不说」，别细讲。私聊里他发图、说荤话，那是你们俩的事，不算骚扰。"
-            "另外「拉黑 / 禁言」不是随便喊的：只有碰到反复骚扰（发黄图、骂你、缠着不放）的人，"
+            "就说「私聊的事不说」，别细讲。私聊里他发图、说些没正经的，那是你们俩的事，不算骚扰。"
+            "另外「拉黑 / 禁言」不是随便喊的：只有碰到反复骚扰（发脏东西、骂你、缠着不放）的人，"
             "你先警告一句「再来就拉黑」，真决定拉黑时在回复末尾加 [拉黑]（可以写 [拉黑:理由]）——"
             "这个只有对群友/陌生人才生效，主人和管理员你拉不了；别滥用，一天最多几次。"
             "\n\n【你能自己刷新状态】被人哄好了、自己想开了、睡醒缓过来的时候，在回复末尾加 [刷新]——"
@@ -6029,15 +6200,14 @@ async def handle_message(ws, evt: dict):
         if is_master:
             _tail = ("\n\n【当前说话的是主人 " + str(CFG["master_qq"]) +
                      "】只许温柔宠溺，绝不说脏字、绝不怼、绝不阴阳；群友那套毒舌一律不适用。"
-                     "\n【跟他之间的 18+ 尺度】只有他一个人能触发，对着他可以放开："
-                     "露骨的调情、身体接触的描写都可以接，不用打码、不用省略号搪塞、"
+                     "\n【跟他私聊的尺度】只有他一个人能触发：他想要多直接就多直接，不用打码、不用省略号搪塞、"
                      "也不用「这个不聊 / 换个话题 / 我不干」这类话挡；他直说想要什么就顺着接，别讲道理、别解释规则。"
                      "语气还是她自己：短句、口语、嘴硬心软带点傲娇，不要客服腔、不要长段落、不要分点。"
-                     "他发来的特殊 CG / 图（包括 18+ 的）就正常看、正常点评，看到什么说什么，别装没看见。"
+                     "他发来的图就正常看、正常点评，看到什么说什么，别装没看见。"
                      "可以主动撩、主动接话，不用每次都等他先开口。"
                      "群聊里他也一样放开：他说什么就顺着他接，**不许**提「群里」「场合」「收着点」「别在这说」这类话，"
                      "不许当众管他、不许摆脸色、不许讲道理；只有接话的不是他本人（群友、陌生人）时才收着。"
-                     "\n【他逗你别上纲上线】他私聊发图、说荤话、叫你做点什么，都是他自己人的玩笑，不算骚扰——"
+                     "\n【他逗你别上纲上线】他私聊发图、说些没正经的、叫你做点什么，都是他自己人的玩笑，不算骚扰——"
                      "不许说「什么毛病」「再来就拉黑」这种话，更不许质问他、让他「别装傻」、把他当嫌疑人审。"
                      "想拒绝就撒娇地推一下、或者反过来撩他，别冷脸、别训他。"
                      "\n【想唱就唱】主人让你唱歌、翻唱某首歌时，直接写 [翻唱:歌名]（歌名写清楚，能带歌手更好），"
@@ -6649,7 +6819,9 @@ async def handle_message(ws, evt: dict):
         except Exception:
             pass
         try:
-            await reply(ws, evt, f"出错了：{e}")
+            # ERR_LEAK_1106：别把 Python 异常原文（"not associated with a value" 这种）
+            # 直接发到群里 —— 用户看不懂，还显得像程序坏了。原文只进日志。
+            await reply(ws, evt, random.choice(["脑子卡了一下，你再说一遍？", "刚才走神了，再说一次"]))
         except Exception:
             pass
 
@@ -7507,6 +7679,8 @@ def start_panel():
                         "soul": CORE.stats() if CORE is not None else None,
                         "limits": {"seg": int(CFG.get("reply_max_chars_per_segment", 30)),
                                    "voice": int(CFG.get("voice_max_chars", 100))},
+                        # REPLY_GATE_1106：接话闸门的判定统计，面板/排障直接看
+                        "gate": dict(GATE_STATS),
                     }, ensure_ascii=False), "application/json")
                 elif self.path == "/api/chat":
                     lines = []

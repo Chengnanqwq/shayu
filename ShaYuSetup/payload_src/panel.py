@@ -40,7 +40,10 @@ PORT = int(os.environ.get("SHayu_PANEL_PORT", "6201"))
 
 def read_cfg() -> dict:
     try:
-        return json.loads(CFG_PATH.read_text(encoding="utf-8"))
+        # BOM_FIX_1106：记事本存「UTF-8 带 BOM」时 utf-8 会直接抛异常，
+        # 面板就渲染成空表；用户再点保存，write_cfg 用空 dict 覆盖掉整份配置。
+        # bot.py 那边一直用的是 utf-8-sig，这里对齐。
+        return json.loads(CFG_PATH.read_text(encoding="utf-8-sig"))
     except Exception:
         return {}
 
@@ -721,7 +724,34 @@ class H(BaseHTTPRequestHandler):
     def _json(self, o, code=200):
         self._send(json.dumps(o, ensure_ascii=False).encode(), "application/json; charset=utf-8", code)
 
+    # PANEL_GUARD_1106：面板虽然只绑 127.0.0.1，但浏览器里的任意网页照样能 POST
+    # 过来（端口是随机的，扫一下就能找到）。这里跟 bot.py 的面板用同一套判据：
+    # Host 必须是回环、Origin 不是本机就拒、POST 只收 JSON。
+    def _origin_ok(self, origin: str) -> bool:
+        if not origin:
+            return True
+        o = origin.strip().rstrip("/").lower()
+        return bool(re.match(r"^https?://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$", o))
+
+    def _host_ok(self) -> bool:
+        host = (self.headers.get("Host") or "").strip()
+        if not host:
+            return True
+        name = host.rsplit(":", 1)[0] if not host.endswith("]") else host
+        return name.strip("[]").lower() in ("127.0.0.1", "localhost", "::1")
+
+    def _guard(self) -> bool:
+        if not self._host_ok():
+            self._json({"ok": False, "error": "bad host"}, code=403)
+            return False
+        if not self._origin_ok(self.headers.get("Origin") or ""):
+            self._json({"ok": False, "error": "bad origin"}, code=403)
+            return False
+        return True
+
     def do_GET(self):
+        if not self._guard():
+            return
         p = self.path.split("?")[0]
         if p == "/api/status":
             cfg = read_cfg()
@@ -822,11 +852,16 @@ class H(BaseHTTPRequestHandler):
         return self._send(PAGE.encode())
 
     def do_POST(self):
+        if not self._guard():
+            return
+        _ctype = (self.headers.get("Content-Type") or "").lower()
+        if _ctype and "application/json" not in _ctype:
+            return self._json({"ok": False, "error": "只收 application/json"}, code=415)
         n = int(self.headers.get("Content-Length", "0"))
         try:
             data = json.loads(self.rfile.read(n) or b"{}")
         except Exception:
-            data = {}
+            return self._json({"ok": False, "error": "body 不是 JSON"}, code=400)
         p = self.path.split("?")[0]
         if p == "/api/config":
             try:
@@ -861,6 +896,8 @@ class H(BaseHTTPRequestHandler):
 
 
 def main():
+    # 端口是每次启动随机的（0 = 让系统挑），所以别再写死 6201：
+    # 真正的地址在下面 print 出来，pywebview / 浏览器用的也是它。
     srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
     port = srv.server_address[1]
     threading.Thread(target=srv.serve_forever, daemon=True).start()

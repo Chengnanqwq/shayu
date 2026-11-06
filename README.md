@@ -10,7 +10,7 @@
 
 |  |  |
 |---|---|
-| **[傻鱼安装包 v0.003（114 MB）](https://github.com/Chengnanqwq/shayu/releases/download/v0.003/ShaYu-Setup-v0.003.exe)** | Windows 10 / 11 64 位 · 单文件自包含 · 自带运行时与协议端 |
+| **[傻鱼安装包 v0.009（114 MB）](https://github.com/Chengnanqwq/shayu/releases/download/v0.009/ShaYu-Setup-v0.009.exe)** | Windows 10 / 11 64 位 · 单文件自包含 · 自带运行时与协议端 |
 | [全部版本 / 更新记录](https://github.com/Chengnanqwq/shayu/releases) | 最新版永远在 Releases 里 |
 | [使用教程（docx）](docs/傻鱼使用教程.docx) | 从装到用，含每一步截图 |
 | [插件商店仓库](https://github.com/Chengnanqwq/shayu-plugins) | 装完在面板里直接能看到 |

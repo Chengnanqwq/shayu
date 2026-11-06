@@ -37,7 +37,7 @@ STORE_NAME = "brain_memory.json"
 LEGACY_NAME = "memory.json"
 SESSION_NAME = "session_memory.json"
 
-MAX_NODES = 900
+MAX_NODES = 2000
 MAX_EDGES = 4200
 MAX_TEXT = 160
 DEDUP_SIM = 0.92          # 同一类里相似到这个程度就当同一条

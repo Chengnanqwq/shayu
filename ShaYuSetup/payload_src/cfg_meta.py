@@ -29,6 +29,11 @@ META = {
     "master_qq": ("conn", "主人 QQ", "只有这个号被当主人，撒娇和特权都对他"),
     "self_name": ("conn", "对外昵称", "她在群里显示的名字"),
     "panel_port": ("conn", "面板端口", "管理面板监听的端口，重装后才生效"),
+    "ws_port": ("conn", "协议端监听端口", "机器人等协议端连进来的端口，跟协议端那边填的要一致"),
+    "update_url": ("conn", "更新检查地址", "查新版本用的地址，留空就不查"),
+    "market_repo": ("conn", "插件市场索引", "user/repo、http(s) 直链或本地 index.json 文件名"),
+    "market_branch": ("conn", "插件市场分支", "索引在哪个分支上，一般 main"),
+    "market_mirror": ("conn", "插件市场镜像", "GitHub 打不开时用的镜像前缀"),
 
     # ---- 模型 ----
     "llm_key": ("model", "DeepSeek 密钥", "用来思考说话的 API key，sk- 开头"),
@@ -41,6 +46,14 @@ META = {
 
     # ---- 人设 ----
     "persona": ("persona", "人设正文", "她的整段人格设定。改完保存再重启，会立刻换个人"),
+    "persona_mode": ("persona", "人设模式", "auto / 整段 / 分段：一条回复要不要拆成几条发"),
+    "persona_name": ("persona", "她叫什么", "自我介绍用的名字，比如 傻鱼"),
+    "persona_role": ("persona", "身份定位", "一句话：她是谁、和主人什么关系、能不能做现实里的事"),
+    "persona_personality": ("persona", "性格", "脾气秉性，写几条关键的就行，别写成简历"),
+    "persona_speech": ("persona", "说话方式", "语气、长度、口癖、禁忌"),
+    "persona_likes": ("persona", "喜欢 / 讨厌", "在乎什么、烦什么，用来决定她的反应"),
+    "persona_rules": ("persona", "不做的事", "硬边界：不装活人、不说自己能出门、不泄露主人隐私"),
+    "persona_extra": ("persona", "补充设定", "别的想加的都写这儿，可以是零散设定"),
 
     # ---- 说话 ----
     "reply_delay_per_char": ("talk", "打字延迟（每字）", "一个字停顿多少秒，模拟真人打字"),
@@ -55,6 +68,19 @@ META = {
     "quote_reply": ("talk", "引用回复", "回复时带上被回复那条消息"),
     "auto_emote_probability": ("talk", "带表情概率", "回复时顺手甩一张表情图的概率，0 就是不带"),
     "debug_reply": ("talk", "调试输出", "把原始回复也打到日志里，排查用"),
+
+    # ---- 接话闸门（REPLY_GATE_1106）----
+    "reply_gate": ("talk", "接话闸门", "off=只走本地规则 / loose=拿不准就接 / balanced=让模型判（推荐）/ strict=没把握就闭嘴"),
+    "gate_llm": ("talk", "让模型判说话对象", "关掉后只按 @、叫名字、引用判断，省 token"),
+    "gate_llm_timeout": ("talk", "判定超时", "判一次最多等几秒，超时就按「大家」交给概率"),
+    "gate_conf_min": ("talk", "判定把握门槛", "strict 档下低于这个把握度就当没跟她说"),
+    "gate_budget_per_min": ("talk", "每群每分钟判定次数", "防刷屏烧 token，0 表示不限"),
+    "gate_cache_seconds": ("talk", "判定缓存", "同一句话的判定结果缓存多久"),
+
+    # ---- 破甲面板（PURGE_1106）----
+    "purge_dir": ("misc", "dsh-purge 目录", "破甲面板用的 dsh-purge 安装目录，留空自动找"),
+    "purge_node": ("misc", "破甲用的 node", "跑 dsh-purge 的 node.exe，留空自动找"),
+    "purge_dsh_base": ("misc", "DSH 宿主根", "带 dsh-agent-instructions 的 @deepseek-ai 目录，留空自动找"),
 
     # ---- 主动 ----
     "proactive_probability": ("proactive", "主动接话概率", "群友说话但没点她时，插嘴的概率。0.2 已经算活泼"),
@@ -113,6 +139,15 @@ META = {
     "local_mode": ("misc", "本地模式", "本地跑的时候不连云端、不建隧道"),
     "master_group_threshold": ("proactive", "主人的特殊门槛", "主人说话时她插话的额外阈值，0 表示主人有特权全接"),
     "vision_master_only": ("perm", "只有主人能看图", "开启后群友发图她不看"),
+
+    # ---- 插件商店 / 分享 ----
+    "store_repo": ("misc", "分享目标仓库", "把自己的插件分享到哪个 GitHub 仓库，user/repo 形式"),
+    "store_branch": ("misc", "分享分支", "分享提交到哪个分支，一般 main"),
+    "store_path": ("misc", "分享目录", "仓库里放插件的目录，比如 plugins"),
+    "store_token": ("misc", "GitHub token", "分享插件用的 fine-grained PAT（Contents 读写），用完记得撤销"),
+    "store_api_base": ("misc", "GitHub API 地址", "一般不用改，走镜像时才填"),
+    "store_mirror": ("misc", "仓库镜像", "GitHub 打不开时用的镜像前缀"),
+    "store_author": ("misc", "分享署名", "分享到商店时署的名字"),
 }
 
 # 功能开关的中文说明

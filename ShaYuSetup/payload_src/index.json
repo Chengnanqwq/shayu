@@ -1,12 +1,12 @@
 {
   "app": {
-    "version": "0.003",
-    "released": "2026-11-05",
-    "notes": "插件市场上传/分享、插件商店、协议端随包、设置页卸载",
-    "url": ""
+    "version": "0.009",
+    "released": "2026-11-06",
+    "notes": "0.009：接话闸门（别人说话时不插嘴）、破甲面板插件（状态/缺口/应用/回滚）、私聊与群聊的说话尺度分开、面板 CSRF/CORS 加固、插件 setup 与定时器修复、记忆上限 2000、面板支持 BOM 配置。0.003 以来的修复全部包含。",
+    "url": "https://github.com/Chengnanqwq/shayu/releases/tag/v0.009"
   },
   "version": 1,
-  "updated": "2026-11-05",
+  "updated": "2026-11-06",
   "plugins": [
     {
       "id": "qzone",

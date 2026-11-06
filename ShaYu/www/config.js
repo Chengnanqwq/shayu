@@ -59,6 +59,17 @@ const META = {
   convo_miss_min_gap_seconds: ["proactive", "算「没提我」的间隔", "间隔超过多少秒还没提她，才计一次"],
   master_group_threshold: ["proactive", "主人的特殊门槛", "主人说话时的额外阈值，0 表示主人全接"],
 
+  reply_gate: ["talk", "接话闸门", "off=只走本地规则 / loose=拿不准就接 / balanced=让模型判（推荐）/ strict=没把握就闭嘴，别人说话时不插嘴"],
+  gate_llm: ["talk", "让模型判说话对象", "关掉后只按 @、叫名字、引用判断，省 token"],
+  gate_llm_timeout: ["talk", "判定超时", "判一次最多等几秒，超时就当「大家」交给概率，单位秒"],
+  gate_conf_min: ["talk", "判定把握门槛", "strict 档下，低于这个把握度就当没跟她说（0~1）"],
+  gate_budget_per_min: ["talk", "每群每分钟判定次数", "防止刷屏把 token 烧光，0 表示不限"],
+  gate_cache_seconds: ["talk", "判定缓存", "同一句话的判定结果缓存多久，单位秒"],
+
+  purge_dir: ["misc", "dsh-purge 目录", "破甲面板用的 dsh-purge 安装目录，留空自动找（~/.dsh/profiles/*/plugins/dsh-purge）"],
+  purge_node: ["misc", "破甲用的 node", "跑 dsh-purge 的 node.exe，留空自动找"],
+  purge_dsh_base: ["misc", "DSH 宿主根", "带 dsh-agent-instructions 的 @deepseek-ai 目录，留空自动找；找错时手填"],
+
   voice_chance: ["voice", "转语音概率", "短句被合成语音发出去的概率"],
   voice_cooldown_min: ["voice", "语音冷却", "两次语音之间至少隔多少分钟"],
   voice_max_chars: ["voice", "语音字数上限", "超过这个字数的内容不转语音"],
