@@ -164,10 +164,13 @@ try:
                 cfg=lambda: CFG,
                 set_cfg=lambda k, v: CFG.__setitem__(k, v),
                 notify=lambda text: notify_master(str(text)),
+            send=lambda uid, txt: _send_msg(ACTIVE_WS, {"message_type": "private", "user_id": int(uid)},
+                                            [{"type": "text", "data": {"text": txt}}])
+            if ACTIVE_WS is not None else False,
                 memory=BRAIN,
                 loop=globals().get("LOOP"),
             )
-            _plugins.start_timers(globals().get("LOOP"))
+            # 定时器不在这里起：此刻 LOOP 还没建，挂了也会被主循环销毁（见 main()）
         except Exception as _pe2:
             print(f"[fish_bot] 插件 API 注入失败: {_pe2}")
 except Exception as _exc:  # 记忆层挂了不影响聊天
@@ -359,6 +362,10 @@ if WS_PORT != _WANT_PORT:
     print(f"[fish_bot] ⚠ {_WANT_PORT} 被别的程序占用，临时用 {WS_PORT}；"
           f"协议端那边要跟着改成 {WS_PORT}（不写回配置）", flush=True)
 ONEBOT_API = int(os.environ.get("FISH_API_PORT") or CFG.get("api_port", 3000))
+# WS_BIND_1106：默认只监听本机。以前绑 0.0.0.0，同一局域网任何人都能连上来冒充
+# SnowLuma 发事件（连"我就是主人"这种伪造都能做）。协议端在别的机器上时，
+# 用 FISH_WS_HOST=0.0.0.0 或配置 ws_host 显式放开。
+WS_HOST = str(os.environ.get("FISH_WS_HOST") or CFG.get("ws_host") or "127.0.0.1")
 
 # ============ LLM（OpenAI 兼容，可换任意服务） ============
 def llm_chat(messages: list[dict], timeout: int = 90, max_tokens: int = 600, tag: str = "",
@@ -721,6 +728,9 @@ import re as _re_tic
 # DeepSeek 的口头禅（整句式）。命中就整句删掉，剩下的拼回去。
 _DS_TICS = (
     r"这(?:句)?话?(?:我)?(?:不接|接不了|接不住)",
+    # TIC_1106：「我不接。」单独成句时也是口癖（文档 5.6 举的就是这句），
+    # 但「我不接这个活」是真内容，所以只在后面紧跟标点或结尾时才删。
+    r"我(?:也)?不接(?=[。！？!?，,、\s]|$)",
     r"这(?:句)?话?(?:很)?稳",
     r"这(?:句)?话?接(?:得|的)漂亮",
     r"这(?:句)?话?我(?:收下|留着|记下)了?",
@@ -7085,16 +7095,73 @@ def _pack_safe(name: str) -> bool:
 
 def start_panel():
     class H(http.server.BaseHTTPRequestHandler):
+        # ── PANEL_GUARD_1106 ───────────────────────────────────────────
+        # 以前面板接口不校验来源，两个真实口子：
+        #   ① 任意网页都能 fetch("http://127.0.0.1:6200/api/run",
+        #      {mode:"no-cors", body:'{"cmd":"..."}'}) —— 文本体是「简单请求」，
+        #      浏览器不发 preflight，于是本机就被执行了命令；
+        #   ② Host 不校验，DNS rebinding 之后还能读到响应。
+        # 现在：Host 必须是回环；Origin 只放行本机面板和面板自己的虚拟域 shayu.app；
+        #      POST 只收 JSON（插件上传那条走 octet-stream，单独放行）。
+        _ALLOW_ORIGINS = ("https://shayu.app", "http://shayu.app")
+
+        def _origin_ok(self, origin: str) -> bool:
+            if not origin:
+                return True                     # curl / 本地程序不带 Origin
+            o = origin.strip().rstrip("/").lower()
+            if o in self._ALLOW_ORIGINS:
+                return True
+            return bool(re.match(r"^https?://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$", o))
+
+        def _host_ok(self) -> bool:
+            host = (self.headers.get("Host") or "").strip()
+            if not host:
+                return True                     # HTTP/1.0 老客户端
+            name = host.rsplit(":", 1)[0] if not host.endswith("]") else host
+            return name.strip("[]").lower() in ("127.0.0.1", "localhost", "::1")
+
+        def _deny(self, why: str):
+            self._send(403, json.dumps({"ok": False, "error": why}, ensure_ascii=False),
+                       "application/json")
+
+        def _guard(self) -> bool:
+            if not self._host_ok():
+                self._deny("bad host")
+                return False
+            if not self._origin_ok(self.headers.get("Origin") or ""):
+                self._deny("bad origin")
+                return False
+            return True
+
+        def _cors(self):
+            origin = (self.headers.get("Origin") or "").strip()
+            if origin and self._origin_ok(origin):
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type")
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+
         def _send(self, code, body, ctype="text/html; charset=utf-8"):
             data = body if isinstance(body, bytes) else body.encode("utf-8", "replace")
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
+            self._cors()
             self.end_headers()
             self.wfile.write(data)
 
+        def do_OPTIONS(self):
+            if not self._guard():
+                return
+            self.send_response(204)
+            self.send_header("Content-Length", "0")
+            self._cors()
+            self.end_headers()
+
         def do_GET(self):
+            if not self._guard():
+                return
             try:
                 if self.path.startswith("/api/market"):
                     # MARKET_1105：拉远端插件索引。默认 GitHub raw，可用 CFG["market_repo"] 覆盖
@@ -7453,11 +7520,24 @@ def start_panel():
                     text = read_latest_diary()
                     self._send(200, json.dumps(text, ensure_ascii=False), "application/json")
                 else:
-                    self._send(200, PANEL_HTML)
+                    if self.path.startswith("/api/"):
+                        # 以前这里回落成面板 HTML + 200，错路由永远不报错
+                        self._send(404, json.dumps({"ok": False, "error": "no such api"},
+                                                   ensure_ascii=False), "application/json")
+                    else:
+                        self._send(200, PANEL_HTML)
             except Exception as e:
                 self._send(500, f"err: {e}")
 
         def do_POST(self):
+            if not self._guard():
+                return
+            _ctype = (self.headers.get("Content-Type") or "").lower()
+            if _ctype and "application/json" not in _ctype and "application/octet-stream" not in _ctype:
+                # 挡住「text/plain + JSON 体」这种浏览器简单请求（跨站 RCE 的那条路）
+                self._send(415, json.dumps({"ok": False, "error": "只收 application/json"},
+                                           ensure_ascii=False), "application/json")
+                return
             if self.path.startswith("/api/wake"):
                 try:
                     if CORE is not None:
@@ -7963,10 +8043,12 @@ def start_panel():
                 try:
                     n = int(self.headers.get("Content-Length", "0"))
                     body = json.loads(self.rfile.read(n) or b"{}")
-                    k = str(body.get("feature", "")).strip()
+                    k = str(body.get("feature") or body.get("key") or "").strip()
                     if k not in {"look", "growth", "proactive", "memory_index", "web", "search", "vision",
                             "poke", "ban", "diary", "local", "qzone", "avatar", "image", "autonomy"}:
-                        self._send(200, json.dumps({"error": "unknown feature"}), "application/json")
+                        # 400 而不是 200：以前调用方拿到 200 会以为开关成功
+                        self._send(400, json.dumps({"ok": False, "error": "unknown feature"},
+                                                   ensure_ascii=False), "application/json")
                         return
                     feats = CFG.setdefault("features", {})
                     feats[k] = bool(body.get("value"))
@@ -8391,6 +8473,14 @@ async def growth_loop():
 async def main():
     global LOOP
     LOOP = asyncio.get_event_loop()
+    # TIMER_LOOP_1106：插件定时器必须挂在「现在这个」loop 上。
+    # 以前在模块 import 阶段就 start_timers()，那时 loop 还没起来，
+    # 任务挂在临时 loop 上、主循环一跑就被销毁，定时任务一次都不会触发。
+    if _PLUGINS_OK and _plugins is not None:
+        try:
+            _plugins.start_timers(LOOP)
+        except Exception as _e:
+            print(f"[fish_bot] 插件定时器启动失败: {_e}")
     load_emotes()
     load_memories()
     load_session_memory()
@@ -8416,8 +8506,8 @@ async def main():
     asyncio.create_task(sleep_schedule_loop())
     asyncio.create_task(wake_watch_loop())
     start_panel()
-    async with websockets.serve(handler, "0.0.0.0", WS_PORT, ping_interval=20):
-        print(f"[fish_bot] 已在 {WS_PORT} 监听，等待 SnowLuma/NapCat 连接")
+    async with websockets.serve(handler, WS_HOST, WS_PORT, ping_interval=20):
+        print(f"[fish_bot] 已在 {WS_HOST}:{WS_PORT} 监听，等待 SnowLuma/NapCat 连接")
         await asyncio.Future()  # 常驻
 
 async def notify_master(ws, text: str) -> None:

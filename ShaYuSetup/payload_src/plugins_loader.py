@@ -67,6 +67,10 @@ _OFF_KEYS = ("DISABLED", "disabled")
 _MSG_HOOKS = ("on_message", "handle", "on_msg", "handle_message", "on_event", "run")
 _INIT_HOOKS = ("setup", "register", "on_load", "init")
 _REPLY_HOOKS = ("on_reply", "rewrite_reply", "post_reply")
+# APP_1106：应用级能力——插件可以改配置、注入面板 UI、挂自己的 HTTP 接口
+_UI_HOOKS = ("ui_html", "ui_css", "ui_js")
+_HTTP_HOOKS = ("handle_http", "on_http", "http")
+_CONFIG_HOOKS = ("on_config", "tune_config")
 _CMD_HOOKS = ("commands", "get_commands", "COMMANDS", "CMDS", "cmd_list")
 
 _LOADED: list[dict] = []
@@ -140,7 +144,9 @@ def _iter_units():
             continue
         if any(seg.startswith("_") or seg.startswith(".") for seg in rel_parts):
             continue
-        if p.is_dir() and (p / "__init__.py").is_file():
+        if p.is_dir() and (p / "plugin.json").is_file():
+            out.append((p, True, "manifest"))       # COMPAT_1106：纯界面插件
+        elif p.is_dir() and (p / "__init__.py").is_file():
             out.append((p, True, "package"))
         elif p.is_file():
             low = p.name.lower()
@@ -299,6 +305,40 @@ async def _maybe_await(v):
     return await v if inspect.isawaitable(v) else v
 
 
+async def _call_reply(fn, ans: str, ctx: Ctx):
+    """调用 on_reply：按 (ans, ctx) → (ans) → (ctx) 的顺序试，取第一个不报错的。
+
+    以前偷懒直接把 ctx 当第一个参数传，结果是 ans 变成了 dict，回复里出现
+    "{'text': '...'}" 这种东西——插件没错，是调用约定错了。
+    """
+    candidates = (
+        lambda: fn(ans, ctx),
+        lambda: fn(ans),
+        lambda: fn({"reply": ans, "text": ans}),
+    )
+    for make in candidates:
+        try:
+            return await _maybe_await(make())
+        except TypeError:
+            continue
+    return None
+
+
+def _call_init(init, api):
+    """INIT_FIX_1106：调 setup(api) / register(api) 这类初始化钩子。
+
+    它拿到的是插件 API（读配置、发消息、写记忆、定时器），不是消息上下文。
+    按 init(api) → init() → init(**{}) 依次试，只降级 TypeError。
+    同步返回原值，异步返回可 await 对象，交给调用方决定要不要 create_task。
+    """
+    for make in (lambda: init(api), lambda: init(), lambda: init(**{})):
+        try:
+            return make()
+        except TypeError:
+            continue
+    return None
+
+
 async def _call_any(fn, ctx: Ctx):
     """按优先级试几种签名；只有 TypeError 才降级，避免误判插件内部错误。"""
     text = ctx.get_text()
@@ -353,6 +393,29 @@ def load_all(verbose: bool = True) -> int:
             "module": None, "target": None, "error": "", "missing": "",
             "kind": kind, "commands": {}, "hooks": [],
         }
+        if kind == "manifest":
+            # 纯界面插件：目录里只有 plugin.json + html/css/js，不执行任何 Python
+            try:
+                import json as _json
+                man = _json.loads((path / "plugin.json").read_text(encoding="utf-8-sig"))
+            except Exception as e:
+                rec["error"] = f"plugin.json 读不了: {e}"
+                _LOADED.append(rec)
+                continue
+            rec["name"] = str(man.get("name") or path.name)
+            rec["version"] = str(man.get("version") or "")
+            rec["desc"] = str(man.get("desc") or "")
+            rec["author"] = str(man.get("author") or "")
+            rec["enabled"] = bool(man.get("enabled", True)) and name_enabled
+            rec["caps"] = list(man.get("caps") or ["ui"])
+            rec["manifest"] = man
+            rec["module"] = None
+            rec["target"] = None
+            rec["hooks"] = ["ui_html", "ui_css", "ui_js", "assets"]
+            rec["commands"] = dict(man.get("commands") or {})
+            _LOADED.append(rec)
+            continue
+
         if not name_enabled and kind == "module" and path.suffix != ".py":
             # .disabled / .off：不导入（后缀不是 .py 导进来必失败），只安全地读一下名字和版本
             try:
@@ -379,17 +442,25 @@ def load_all(verbose: bool = True) -> int:
             target = _target_of(mod)
             rec["target"] = target
             rec["commands"] = _commands_of(mod, target)
-            rec["hooks"] = [h for h in (_MSG_HOOKS + _REPLY_HOOKS)
+            rec["caps"] = list(getattr(target, "CAPS", ()) or [])
+            rec["hooks"] = [h for h in (_MSG_HOOKS + _REPLY_HOOKS + _UI_HOOKS + _HTTP_HOOKS + _CONFIG_HOOKS)
                             if callable(getattr(target, h, None) if not isinstance(target, dict)
                                         else target.get(h))]
 
             init = _hook(target, _INIT_HOOKS) or _hook(mod, _INIT_HOOKS)
             if init:
                 try:
-                    r = _call_any(init, _wrap_ctx({"text": "", "user": ""}))
-                    asyncio.get_event_loop().create_task(r) if inspect.isawaitable(r) else None
+                    # INIT_FIX_1106：init 钩子收的是 PluginAPI，不是消息的 Ctx。
+                    # 以前图省事借 _call_any 来调，而它第一条就是 ctx.get_text()，
+                    # PluginAPI 没这个方法 → 抛 AttributeError 被 create_task 吞掉，
+                    # 结果所有插件的 setup(api)（api.every / memory_add / notify / set_cfg）全部失效。
+                    r = _call_init(init, make_api(rec["name"]))
+                    if inspect.isawaitable(r):
+                        asyncio.get_event_loop().create_task(r)
                 except Exception as e:
                     rec["error"] = f"init 失败（已忽略）：{type(e).__name__}: {e}"
+                    if verbose:
+                        print(f"[plugins] {rec['name']} init 失败：{rec['error']}", flush=True)
             if rec["hooks"]:
                 ok += 1
         except (ImportError, ModuleNotFoundError) as e:
@@ -491,7 +562,7 @@ async def dispatch_reply(ans: str, ctx: dict | None = None) -> str:
         if not callable(fn):
             continue
         try:
-            r = await asyncio.wait_for(_call_any(fn, {**c, "reply": out, "text": out}), timeout=8)
+            r = await asyncio.wait_for(_call_reply(fn, out, c), timeout=8)
             if isinstance(r, str) and r.strip():
                 out = r
             elif isinstance(r, tuple) and r and isinstance(r[0], str) and r[0].strip():
@@ -514,22 +585,279 @@ def dispatch_reply_sync(ans: str, ctx: dict | None = None) -> str:
         fn = _hook(target, _REPLY_HOOKS)
         if not callable(fn):
             continue
-        try:
-            r = fn({**c, "reply": out, "text": out})
-            if inspect.isawaitable(r):
-                continue
-            if isinstance(r, str) and r.strip():
-                out = r
-        except TypeError:
+        r = None
+        for call in (lambda: fn(out, c), lambda: fn(out), lambda: fn({"reply": out, "text": out})):
             try:
-                r = fn(out)
-                if isinstance(r, str) and r.strip():
-                    out = r
+                r = call()
+                break
+            except TypeError:
+                continue
             except Exception as e:
                 p["error"] = f"on_reply: {type(e).__name__}: {e}"
-        except Exception as e:
-            p["error"] = f"on_reply: {type(e).__name__}: {e}"
+                r = None
+                break
+        if inspect.isawaitable(r):
+            r = None
+        if isinstance(r, str) and r.strip():
+            out = r
     return out
+
+
+# ══════════════════════════════════════════════════════════
+#  EXT_1106：给插件用的 API（拓展点）
+#  插件写 setup(api) 就能拿到这些能力：读配置、发消息、查/加记忆、定时器、日志
+# ══════════════════════════════════════════════════════════
+_BOT: dict = {}
+_TIMERS: list = []
+_TIMER_TASK = None        # TIMER_LOOP_1106：定时器循环的句柄，防重复启动 / 防挂错 loop
+
+
+def set_bot_hooks(**kw) -> None:
+    """由 bot 注入真实实现（notify / cfg / memory / send）。"""
+    _BOT.update(kw)
+
+
+class PluginAPI:
+    """传给插件的把手。拿不到的能力就是 None，插件自己判空即可。"""
+
+    def __init__(self, name: str):
+        self.name = name
+
+    # ── 配置 ──
+    def cfg(self, key: str | None = None, default=None):
+        c = _BOT.get("cfg")
+        c = c() if callable(c) else (c or {})
+        return c.get(key, default) if key else c
+
+    def set_cfg(self, key: str, value) -> bool:
+        fn = _BOT.get("set_cfg")
+        if not callable(fn):
+            return False
+        try:
+            fn(key, value)
+            return True
+        except Exception:
+            return False
+
+    # ── 消息 ──
+    def notify(self, text: str) -> bool:
+        """给主人发一条（走 bot 自己的推送通道）。"""
+        fn = _BOT.get("notify")
+        if not callable(fn):
+            return False
+        try:
+            r = fn(str(text))
+            if inspect.isawaitable(r):
+                loop = _BOT.get("loop")
+                if loop:
+                    loop.create_task(r)
+            return True
+        except Exception:
+            return False
+
+    # ── 主动发消息 ──
+    def send(self, user_id, text: str) -> bool:
+        """给某个 QQ 发一条私聊（插件做「主动接话」这类功能要用）。"""
+        fn = _BOT.get("send")
+        if not callable(fn):
+            return False
+        try:
+            r = fn(str(user_id), str(text))
+            if inspect.isawaitable(r):
+                loop = _BOT.get("loop")
+                if loop:
+                    loop.create_task(r)
+                else:
+                    return False
+            return True
+        except Exception:
+            return False
+
+    # ── 记忆 ──
+    def memory_add(self, text: str, kind: str = "fact", imp: float = 0.6,
+                   subj: str = "", tags=None) -> bool:
+        b = _BOT.get("memory")
+        if b is None:
+            return False
+        try:
+            b.add(text, "plugin:" + self.name, kind=kind, source="explicit",
+                  subj=subj, imp=imp, tags=tags or [])
+            return True
+        except Exception:
+            return False
+
+    def memory_count(self) -> int:
+        b = _BOT.get("memory")
+        try:
+            return len(b.nodes)
+        except Exception:
+            return -1
+
+    # ── 定时器 ──
+    def every(self, seconds: float, fn) -> None:
+        """注册周期任务：每 seconds 秒调一次 fn(api)。"""
+        _TIMERS.append({"plugin": self.name, "sec": float(seconds), "fn": fn, "next": 0.0})
+
+    def log(self, *a) -> None:
+        print("[plugin:" + self.name + "]", *a, flush=True)
+
+
+def make_api(name: str) -> PluginAPI:
+    return PluginAPI(name)
+
+
+async def _timer_loop() -> None:
+    import time as _t
+    while True:
+        now = _t.time()
+        for t in list(_TIMERS):
+            if now < t["next"]:
+                continue
+            t["next"] = now + max(1.0, t["sec"])
+            try:
+                r = t["fn"](make_api(t["plugin"]))
+                if inspect.isawaitable(r):
+                    await r
+            except Exception as e:
+                print(f"[plugins] 定时任务出错 {t['plugin']}: {type(e).__name__}: {e}", flush=True)
+        await asyncio.sleep(0.5)
+
+
+def start_timers(loop=None) -> None:
+    """bot 启动时调一次，把插件注册的周期任务跑起来。
+
+    TIMER_LOOP_1106：必须在「真正在跑的 loop」里起。以前 bot 在 import 阶段就调
+    start_timers(None)，那会儿 loop 还没建，任务挂在临时 loop 上，主循环一启动就被销毁
+    （日志里那句 Task was destroyed but it is pending，说的就是它），定时器永远不触发。
+    现在记下任务句柄，重复调用直接忽略；调用方也改成了 main() 里 LOOP 就绪之后再调。
+    """
+    global _TIMER_TASK
+    if not _TIMERS:
+        return
+    if _TIMER_TASK is not None and not _TIMER_TASK.done():
+        return
+    try:
+        if loop is None:
+            loop = asyncio.get_running_loop()
+        _TIMER_TASK = loop.create_task(_timer_loop())
+        print(f"[plugins] 定时任务 {len(_TIMERS)} 个已启动", flush=True)
+    except Exception as e:
+        print(f"[plugins] 定时任务启动失败: {e}", flush=True)
+
+
+def ui_payload() -> list[dict]:
+    """面板要注入的 UI：每个插件返回 {name, css, html, js}。
+
+    插件里这样写就行：
+        CAPS = ("ui",)
+        def ui_html(): return "<div class='card'>...</div>"
+        def ui_css():  return ".card{...}"
+        def ui_js():   return "shayu.on('click', '#mybtn', ...)"
+    """
+    if not _READY:
+        load_all(verbose=False)
+    out = []
+    for p in _LOADED:
+        if not p["enabled"]:
+            continue
+        target = p["target"] or p["module"]
+        caps = set(p.get("caps") or [])
+        if "ui" not in caps and not any(callable(getattr(target, h, None)) for h in _UI_HOOKS):
+            continue
+        item = {"name": p["name"], "file": p["path"].name}
+        man = p.get("manifest")
+        if man:
+            base = p["path"]
+            for key in ("html", "css", "js"):
+                fn = man.get(key) or (f"ui.{ 'htm' if key=='html' else key }")
+                fp = base / str(fn)
+                if not fp.exists() and key == "html":
+                    fp = base / "ui.html"
+                if fp.exists():
+                    try:
+                        item[key] = fp.read_text(encoding="utf-8-sig")
+                    except Exception:
+                        pass
+            if "html" in item or "js" in item:
+                out.append(item)
+            continue
+        for key, hooks in (("html", ("ui_html",)), ("css", ("ui_css",)), ("js", ("ui_js",))):
+            fn = _hook(target, hooks)
+            if not callable(fn):
+                continue
+            try:
+                v = fn()
+                if isinstance(v, str) and v.strip():
+                    item[key] = v
+            except Exception as e:
+                p["error"] = f"{hooks[0]}: {type(e).__name__}: {e}"
+        if len(item) > 2:
+            out.append(item)
+    return out
+
+
+def http_route(name: str, path: str, query: dict | None = None, body: bytes = b""):
+    """插件自己的 HTTP 接口：/plug/<插件>/<path>。
+
+    返回 (status, payload)；插件没实现就返回 404，不会影响别的插件。
+    """
+    if not _READY:
+        load_all(verbose=False)
+    p = _find(name)
+    if not p or not p["enabled"]:
+        return 404, {"ok": False, "error": "没有这个插件"}
+    target = p["target"] or p["module"]
+    fn = _hook(target, _HTTP_HOOKS)
+    if not callable(fn):
+        # COMPAT_1106：没写接口就当成静态目录，直接读插件目录里的文件
+        import mimetypes
+        base = p["path"] if p["path"].is_dir() else p["path"].parent
+        rel = (path or "").lstrip("/") or "index.html"
+        if ".." in rel.split("/"):
+            return 400, {"ok": False, "error": "bad path"}
+        fp = base / rel
+        if fp.is_file():
+            ctype = mimetypes.guess_type(str(fp))[0] or "application/octet-stream"
+            try:
+                return 200, fp.read_bytes(), ctype   # 二进制由调用方按 ctype 发
+            except Exception as e:
+                return 500, {"ok": False, "error": str(e)}
+        return 404, {"ok": False, "error": "no such file"}
+    try:
+        r = None
+        for call in (lambda: fn(path, query or {}, body), lambda: fn(path), lambda: fn()):
+            try:
+                r = call()
+                break
+            except TypeError:
+                continue
+        if inspect.isawaitable(r):
+            return 500, {"ok": False, "error": "异步 HTTP 钩子请用同步函数"}
+        if isinstance(r, tuple) and len(r) == 2:
+            return int(r[0]), r[1]
+        return 200, r if r is not None else {"ok": True}
+    except Exception as e:
+        p["error"] = f"http: {type(e).__name__}: {e}"
+        return 500, {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
+def apply_config_hooks(cfg: dict) -> dict:
+    """启动时让插件看一眼配置（可以是补默认值、纠正老配置）。"""
+    if not _READY:
+        load_all(verbose=False)
+    for p in _LOADED:
+        if not p["enabled"]:
+            continue
+        fn = _hook(p["target"] or p["module"], _CONFIG_HOOKS)
+        if not callable(fn):
+            continue
+        try:
+            out = fn(cfg)
+            if isinstance(out, dict):
+                cfg = out
+        except Exception as e:
+            p["error"] = f"on_config: {type(e).__name__}: {e}"
+    return cfg
 
 
 def reload_plugin(identifier: str) -> bool:
